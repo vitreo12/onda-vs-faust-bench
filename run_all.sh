@@ -1,14 +1,20 @@
 #!/bin/bash
 # Builds and runs every program in two passes, then regenerates the report.
-#   pass 1: default clang contract (results/results.tsv)
-#   pass 2: C++ strict variants at -ffp-contract=off (results/results_nocontract.tsv, the "IEEE" columns)
+#   pass 1: default clang contract (build/macos/results.tsv)
+#   pass 2: C++ strict variants at -ffp-contract=off (build/macos/results_nocontract.tsv, the "IEEE" columns)
 #   ROUNDS=21 KERNELS="sine zita_rev" ./run_all.sh
 # The fcautotool election (results/autotool/) is redone separately by tools/autotune_all.sh.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
-KERNELS=${KERNELS:-"sine fm_pad additive64 noise tanh_drive biquad8 peq10 svf_mod fir32c fir32 hoa_decoder_x hoa_decoder mixer16_x mixer16 freeverb fdn8 diffuser32 zita_rev clarinet violin frenchbell frenchbell_x"}
+if [ -z "${KERNELS:-}" ]; then
+  for source in dsp/*.onda; do
+    name=${source##*/}
+    KERNELS="${KERNELS:-} ${name%.onda}"
+  done
+fi
 ROUNDS=${ROUNDS:-21}
-mkdir -p results
+OUT="$HERE/build/macos"
+mkdir -p "$OUT"
 run_pass() {  # $1 = output file, $2 = extra flags for the strict C++ variants
   : > "$1"
   for n in $KERNELS; do
@@ -16,8 +22,8 @@ run_pass() {  # $1 = output file, $2 = extra flags for the strict C++ variants
     (cd "build/$n" && ./bench "$HERE/dsp/$n.dsp" "$n" "$ROUNDS" 2>/dev/null) | tee -a "$1"
   done
 }
-run_pass results/results.tsv ""
-run_pass results/results_nocontract.tsv "-ffp-contract=off"
-python3 report/gen.py "$HERE"
-python3 report/readme_chart.py "$HERE"
-echo "report: $HERE/report/onda-vs-faust.html"
+run_pass "$OUT/results.tsv" ""
+run_pass "$OUT/results_nocontract.tsv" "-ffp-contract=off"
+python3 report/gen.py "$HERE" "$OUT"
+python3 report/readme_chart.py "$OUT" --apple-results "$OUT/results.json"
+echo "report: $OUT/onda-vs-faust.html"

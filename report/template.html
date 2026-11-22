@@ -41,12 +41,6 @@ td.win { color: var(--win); } td.loss { color: var(--loss); } td.tie { color: va
 .group-onda { color: var(--onda); } .group-faust { color: var(--faust); }
 .note { color: var(--muted); font-size: .86rem; }
 #chart svg { display: block; width: 100%; height: auto; }
-.findings { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-.finding { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; min-width: 0; }
-.finding .tag { font: 500 .72rem var(--f-mono); letter-spacing: .05em; text-transform: uppercase; }
-.finding .tag.o { color: var(--onda); } .finding .tag.f { color: var(--faust); }
-.finding h3 { margin: .3em 0 .4em; font-size: 1.02rem; }
-.finding p { font-size: .92rem; margin: 0; }
 details { border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); margin-bottom: 10px; }
 summary { cursor: pointer; padding: 10px 14px; font-weight: 500; }
 summary:focus-visible, a:focus-visible { outline: 2px solid var(--onda); outline-offset: 2px; }
@@ -60,31 +54,26 @@ dl.method dt { font: 500 .8rem var(--f-mono); color: var(--muted); padding-top: 
 dl.method dd { margin: 0; min-width: 0; }
 tr.cat th { text-align: left; font: 600 .78rem var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--bg); padding-top: 14px; }
 tbody th .lab { display: block; font-size: .78rem; color: var(--muted); font-weight: 400; }
-tr.variant th, tr.variant td { color: var(--muted); font-style: italic; }
-tr.variant td.best { background: transparent; }
-.findgroup { display: grid; gap: 12px; }
-.findgroup > h3 { margin: 18px 0 0; font-size: 1.12rem; }
 @media (max-width: 560px) { dl.method { grid-template-columns: 1fr; } dl.method dt { padding-top: 8px; } }
 </style>
 
 <main>
 <header class="prose">
-  <div class="eyebrow">Onda 0.9.2 · Faust 2.95.1 and branch master-dev-certification-4 · Apple M5 · f32 · 48 kHz · 256-frame blocks</div>
+  <div class="eyebrow">macOS · f32 · 48 kHz · 256-frame blocks</div>
   <h1>Onda vs Faust</h1>
-  <p class="lede">%%NPROG%% DSP programs written equivalently in Faust and Onda, from oscillators to reverbs, measured on a common harness against 13 Faust configurations. The Onda compiler generates very good native code: against Faust 2.95.1 (C++ and LLVM, every option), it is on average <strong>%%GSO%%× faster</strong> under strict IEEE semantics and <strong>%%GFO%%× faster</strong> with fast-math. The <code>-lang ocpp</code> backend of the <code>master-dev-certification-4</code> branch, tuned by <code>fcautotool</code>, puts Faust ahead: onda <strong>×%%GS%%</strong> strict and <strong>×%%GF%%</strong> with fast-math.</p>
-  <p class="lede">The gaps follow the kind of computation: onda dominates as soon as it vectorizes (oscillator banks, saturation), Faust cert-4 dominates delay lines and filter cascades, where it chooses the order of operations and reads delays ahead. Two onda pitfalls, easy to avoid once known, cost a factor of 30 to 50: the <code>ins[i]</code>/<code>outs[i]</code> views, and control-rate computations left in the per-sample loop.</p>
+  <p class="lede">%%NPROG%% DSP workloads measured in a shared harness. Against stock Faust, the geometric mean speedup for Onda is ×%%GSO%% in strict arithmetic and ×%%GFO%% with fast math.</p>
   <div class="kpis">
     <div class="kpi"><b>×%%GSO%%</b><span>onda strict / Faust 2.95.1 IEEE</span></div>
     <div class="kpi"><b>×%%GS%%</b><span>onda strict / best Faust IEEE, cert-4 included</span></div>
     <div class="kpi"><b>×%%GF%%</b><span>onda fast-math / best Faust fast-math</span></div>
     <div class="kpi"><b>%%WINS%%–%%TIES%%–%%LOSSES%%</b><span>onda wins, ties, losses in strict mode (fast-math: %%FWINS%%–%%FTIES%%–%%FLOSSES%%)</span></div>
   </div>
-  <p class="note">Geometric means over the %%NPROG%% programs, without the three alternative writings.</p>
+  <p class="note">Geometric means over the %%NPROG%% measured workloads.</p>
 </header>
 
 <section>
   <h2>Results</h2>
-  <p class="prose">Median time in <strong>ns per sample</strong> (lower is better), 21 interleaved and shuffled rounds of ~40 ms each. The highlighted cell is the fastest of the row. "C++" and "Faust LLVM": Faust 2.95.1. "ocpp" and "fcautotool pick": faust of the <code>master-dev-certification-4</code> branch. "Fixed SR": sample rate constant at compile time, as in onda. The last two columns compare like with like: <span class="group-onda">onda</span> strict against the best Faust IEEE build (C++ or ocpp, scalar or <code>-vec</code>, at <code>-ffp-contract=off</code>), and <span class="group-onda">onda --fast-math</span> against the best fast-math Faust build, Faust LLVM included (it always emits fast-math operations). Rows in italics are other ways of writing the program in Onda; they do not count in the means.</p>
+  <p class="prose">Median time in <strong>ns per sample</strong> (lower is better), 21 interleaved and shuffled rounds of ~40 ms each. The highlighted cell is the fastest of the row. "C++" and "Faust LLVM": Faust 2.95.1. "ocpp" and "fcautotool pick": faust of the <code>master-dev-certification-4</code> branch. "Fixed SR": sample rate constant at compile time, as in onda. The last two columns compare like with like: <span class="group-onda">onda</span> strict against the best Faust IEEE build (C++ or ocpp, scalar or <code>-vec</code>, at <code>-ffp-contract=off</code>), and <span class="group-onda">onda --fast-math</span> against the best fast-math Faust build, Faust LLVM included (it always emits fast-math operations).</p>
   <div class="scroll">
     <table>
       <thead><tr><th scope="col" style="text-align:left">Program</th>%%HEAD%%<th scope="col">Strict: best Faust IEEE / onda</th><th scope="col">Fast: best Faust / onda-fm</th></tr></thead>
@@ -93,51 +82,13 @@ tr.variant td.best { background: transparent; }
       </tbody>
     </table>
   </div>
-  <p class="note">Outputs compared over 4 s with C++ -O3: relative RMS difference ≤ 3·10⁻⁶, except sine (7·10⁻⁵), fm_pad and additive64 (5 to 8·10⁻⁴, f32 phase drift) and peq10 (6·10⁻⁴, low poles in f32), the same order as between the Faust builds themselves. noise is bit-identical between onda and C++ IEEE.</p>
+  <p class="note">The harness compares four seconds of output to the scalar Faust C++ reference.</p>
 </section>
 
 <section id="chart">
   <h2>onda speedup, like for like</h2>
   <p class="prose note">Logarithmic scale. Right of 1, onda is faster.</p>
   <div class="scroll" style="padding:12px 8px"><svg id="bars" role="img" aria-label="Speed ratio onda / best Faust per program"></svg></div>
-</section>
-
-<section>
-  <h2>What the generated code shows</h2>
-  <div class="findgroup">
-  <h3>Where onda wins</h3>
-  <div class="findings">
-    <div class="finding"><span class="tag o">additive64 ×3.4, tanh_drive ×1.6 (strict)</span><h3>Vectorization and built-in SLEEF</h3><p>Written as arrays, the 64 partials of additive64 are updated in SIMD and go through <code>Sleef_sinf4</code> (16 calls instead of 64 <code>sinf</code>): 34 ns with fast-math against 152 for the ocpp pick and 81 for the best Faust build (<code>-vec</code> + Accelerate). tanh_drive goes through <code>Sleef_tanhf4</code>. The Faust C++ backends call scalar libm, and their <code>-vec</code> mode does not vectorize a phase recurrence.</p></div>
-    <div class="finding"><span class="tag o">noise ×2.6, zita_rev ×2.1 against -lang cpp</span><h3>State in registers, Hadamard kept whole</h3><p>onda loads the state on entry to <code>onda_process</code> and writes it back on exit (noise loop: 8 instructions, 1 memory access). <code>-lang cpp</code> copies every <code>fRec[0]/[1]</code> through memory at each sample: moving the noise recursion into a local variable takes the C++ from 3.20 to 1.20 ns. On zita_rev, the normalizer flattens the allpasses into the Hadamard (16-term sums, ~120 additions instead of 32): 570 instructions per sample against 236. ocpp fixes both: 1.33 ns on noise, 10.7 on zita_rev with fast-math against 10.4 for onda.</p></div>
-  </div>
-  <h3>Where Faust wins</h3>
-  <div class="findings">
-    <div class="finding"><span class="tag f">freeverb ×2.4, fdn8 ×2.3</span><h3>Delay lines read one sample ahead</h3><p>ocpp reads the next sample's delay line at the end of the current iteration (<code>fTemp0 = fVeeec0; fVeeec0 = buf[(IOTA-224)&amp;255];</code>), which takes the load latency off the critical path, and keeps the state in scalars with a single masked <code>IOTA</code>. freeverb: 2.73 ns against 6.47 for onda, which recomputes a circular index per line. fdn8, with the <code>-ls-fuse -ls-sched model</code> pick: 2.34 ns against 5.38.</p></div>
-    <div class="finding"><span class="tag f">peq10 ×1.6 strict, biquad8 ×1.5</span><h3>Order of operations and signal algebra</h3><p>On peq10, ocpp merges the stages (a stage's input memory is the delayed output of the previous one) and writes <code>fSlow13·y[0] + (past terms)</code>: a single multiply-add per stage on the critical path. 5.22 ns in IEEE and 3.48 with FMA contraction, against 8.47 for onda, which follows the source order and may not change it in strict mode. With <code>-ffast-math</code>, clang undoes that order (9.85 ns). On biquad8, Faust recognizes <code>b2 ≡ b0</code> and factors it: 2.77 ns with fast-math against 4.23.</p></div>
-    <div class="finding"><span class="tag f">diffuser32 ×1.3 strict, ×1.9 at best</span><h3>Stage by stage rather than sample by sample</h3><p>Faust <code>-vec</code> computes each allpass over 32 samples before moving on to the next; since the delays (≥ 113) exceed the vector size, the iterations of a stage are independent and the processor overlaps them: 15.9 ns in IEEE. The <code>-lang ocpp -temp 4 -ls-fuse -ls-sched model</code> pick goes down to 11.5 ns. onda (21.4 ns) chains the 32 stages for every sample, a 32-link serial chain.</p></div>
-    <div class="finding"><span class="tag f">fm_pad ×2.2</span><h3>Split loops and vector libm</h3><p>Faust <code>-vec</code> puts the four phase recurrences in short scalar loops and the 4 sin + 2 tanh in a recurrence-free loop, which clang vectorizes with Accelerate's <code>vsinf</code>/<code>vtanhf</code>: 6.4 ns against 14.2. onda keeps a single per-sample loop: the recurrence blocks vectorization and SLEEF does not come into play. Without Accelerate, no Faust configuration beats onda.</p></div>
-    <div class="finding"><span class="tag f">clarinet ×1.3 strict, ×2.0 fast-math</span><h3>A complete physical model</h3><p><code>pm.clarinet_ui_MIDI</code> ported line for line (reed table, two-way bore with 4th-order Lagrange fractional delays, bell reflection, blower with vibrato table oscillator and filtered breath noise): onda reproduces the Faust output to 5·10⁻⁷ relative RMS. onda (10.9 ns) is level with <code>-lang cpp</code> (10.7), ocpp is faster: 8.0 ns in IEEE, 6.1 with fast-math. Both loops have ~205 instructions, but onda makes twice as many memory accesses (47 against 26, struct state and the local tap array). With <code>--fast-math</code>, onda gets slower (12.2 ns).</p></div>
-    <div class="finding"><span class="tag f">frenchbell ×1.5 strict, ×1.7 fast-math</span><h3>A modal bank rolled into a loop</h3><p><code>pm.frenchBell_ui</code>: 50 <code>pm.modeFilter</code> resonators in parallel, excited by a filtered noise strike. onda, with the modes written as arrays, vectorizes their update and beats <code>-lang cpp</code> 2.6× (18.7 ns against 48.2). ocpp recognizes the 50 filters as a family of identical structures, rolls them into a loop over coefficient tables and splits the long sum into 4 interleaved partial sums: 12.8 ns in IEEE, 8.1 with fast-math. onda, in strict mode, must keep the 49 additions of the sum in order; written by hand with 4 partial sums (variant <code>frenchbell_x</code>), it reaches 16.3 ns.</p></div>
-    <div class="finding"><span class="tag f">violin ×1.2 strict, ×1.3 fast-math</span><h3>Bowed string</h3><p><code>pm.violin_ui_MIDI</code>: two string segments of two fractional delay lines each, nut and bridge reflection filters, bow table, body resonator. onda reproduces Faust to 6·10⁻⁷ and takes 24.4 ns against 21.1 for <code>-lang cpp</code> in IEEE, 20.1 against 15.8 for <code>-vec</code> + Accelerate with fast-math. The faust of the certification-4 branch rejects this program with the current libraries (the interval analysis cannot bound the <code>de.fdelay4</code> index in the string loop, the official <code>violinMIDI.dsp</code> included): its columns are empty.</p></div>
-    <div class="finding"><span class="tag f">fir32c ×1.2</span><h3>Constant-tap FIR</h3><p>onda 4.43 ns against 3.71 for ocpp IEEE: the taps are reloaded from memory even from a <code>const</code> array, and the strict sum starts with <code>0.0 + …</code>, which IEEE forbids folding (−0). With fast-math the two meet (3.81 against 3.75).</p></div>
-  </div>
-  <h3>Writing pitfalls on the onda side</h3>
-  <div class="findings">
-    <div class="finding"><span class="tag f">hoa_decoder: ×50 → ×1.7 strict</span><h3>The <code>ins[i]</code>/<code>outs[i]</code> views</h3><p>Written with <code>ins[j]</code>/<code>outs[k]</code>, as onda's documentation shows, every access becomes a tree of comparisons and <code>fcsel</code>; nothing is unrolled or vectorized: 32 ns against 0.65. With named ports gathered in a local array, onda vectorizes: 1.10 ns strict, 0.67 with fast-math, on par with Faust. The remaining strict gap comes from the 16 zero coefficients of the matrix: Faust removes them, LLVM may not in IEEE (<code>x·0</code> is NaN or −0).</p></div>
-    <div class="finding"><span class="tag f">mixer16: ×40 → ×1.1 strict</span><h3>Control-rate computations left in the loop</h3><p><code>pow</code>, <code>cos</code>, <code>sin</code> of parameters written in <code>sample:</code> stay per sample (16 <code>powf</code> + 16 <code>sincosf</code>); Faust computes <code>gain·pan·master</code> once per block. With the coefficients in <code>block:</code> and named ports, onda takes 1.34 ns strict (1.22 for ocpp) and 0.93 with fast-math, ahead of Faust (1.19).</p></div>
-  </div>
-  <h3>Faust settings</h3>
-  <div class="findings">
-    <div class="finding"><span class="tag f">ocpp ×%%OCPPGAIN%%</span><h3>cert-4 and fcautotool</h3><p>Under the same IEEE contract, ocpp is on average %%OCPPGAIN%%× faster than the <code>-lang cpp</code> of 2.95.1 over the %%NPROG%% programs; the options elected by <code>fcautotool</code> bring the gain to %%BESTGAIN%%× with fast-math. The pick depends on the program: <code>-lsum</code> for tanh_drive and hoa_decoder, <code>-ss 8</code> for freeverb, <code>-ls-fuse</code> for fdn8 and peq10, <code>-rp</code> for zita_rev, and <code>-lang cpp</code> stays best on fir32c and svf_mod.</p></div>
-    <div class="finding"><span class="tag o">Fixed SR: ±4 %</span><h3>Fixing the sample rate changes almost nothing</h3><p>With <code>SR = 48000.0</code> in <code>platform.lib</code>, Faust folds the constants that depend on <code>fSampleRate</code>, but those computations already ran once at init or once per block. Differences ≤ 4 %, except zita_rev (−6 % for Faust LLVM, +15 % for the pick) and peq10 (ocpp IEEE −10 %, pick +8 %). onda gets no measurable advantage from compiling the sample rate in.</p></div>
-    <div class="finding"><span class="tag o">Floating-point contract</span><h3>Comparing like with like</h3><p>onda emits neither FMA contraction nor reassociation without <code>--fast-math</code>. Apple clang contracts into FMA by default (<code>-ffp-contract=on</code>), which sometimes changes the result a lot (peq10 ocpp: 3.48 ns with FMA, 5.80 without), and Faust LLVM marks every operation <code>reassoc nnan ninf nsz arcp contract</code>. Hence the IEEE columns at <code>-ffp-contract=off</code>, and Faust LLVM ranked with fast-math.</p></div>
-  </div>
-  <h3>onda's implementation</h3>
-  <div class="findings">
-    <div class="finding"><span class="tag o">Proven bounds, JIT = AOT</span><h3>What works well</h3><p>No index clamp in the loops of fir, fdn8 and zita_rev: the <code>{N, wrap}</code> domains and the MIR bounds proofs remove the checks. State arrays vectorize (SLP across the 8 damping filters of zita_rev). The AOT object and the ORC JIT give the same times within 5 %. Compilation: 40 to 80 ms (full CLI) against ~1 s for faust + clang -O3 and 5 to 70 ms for the Faust LLVM JIT.</p></div>
-    <div class="finding"><span class="tag f">Rough edges</span><h3>Language and build</h3><p>No scientific-notation literals (<code>1e-20</code> is rejected). The build requires exactly LLVM 21, and the <code>target.cpp</code> shim initializes every target of the LLVM installation: linking fails with a distribution LLVM (AMDGPU…), a prefix limited to 4 targets was needed. LLVM 21 does not know the Apple M5: onda targets apple-m4.</p></div>
-  </div>
-  </div>
 </section>
 
 <section>
@@ -151,7 +102,7 @@ tr.variant td.best { background: transparent; }
       </tbody>
     </table>
   </div>
-  <p class="note">Times measured by fcautotool with its own harness: they rank the candidates against each other; the results table gives the times of the common harness. The <code>_x</code> variants share their original's Faust source, hence its election.</p>
+  <p class="note">Times measured by fcautotool with its own harness: they rank the candidates against each other; the results table gives the times of the common harness.</p>
 </section>
 
 <section class="prose">
@@ -163,22 +114,21 @@ tr.variant td.best { background: transparent; }
 <section class="prose">
   <h2>Method</h2>
   <dl class="method">
-    <dt>Machine</dt><dd>Apple M5, macOS 26.6, on AC power, thread at user-interactive QoS.</dd>
-    <dt>onda</dt><dd>0.9.2, built against MacPorts LLVM 21.1.8 (the project pins 21.1.2). AOT object <code>--emit obj --target-cpu host -b 256 --sr 48000</code>, with and without <code>--fast-math</code>, called through the raw ABI (<code>onda_process</code>).</dd>
+    <dt>Machine</dt><dd>macOS, with the benchmark thread at user-interactive QoS.</dd>
+    <dt>Onda</dt><dd>AOT objects built with <code>--emit obj --target-cpu host -b 256 --sr 48000</code>, with and without <code>--fast-math</code>, called through <code>onda_process</code>.</dd>
     <dt>Faust C++</dt><dd><code>faust -lang cpp</code> 2.95.1 (<code>-scal</code> and <code>-vec -vs 32</code>) with the libraries of the faustlibraries checkout, Apple clang <code>-O3 -mcpu=native</code>, three contracts: default (FMA), <code>-ffp-contract=off</code>, <code>-ffast-math</code>; plus <code>-vec</code> with <code>-fveclib=Accelerate</code>.</dd>
     <dt>Faust LLVM</dt><dd><code>libfaustwithllvm</code> (2.95.1), <code>createDSPFactoryFromFile</code>, opt −1 (max), <code>-scal</code> and <code>-vec -vs 32</code>, plus <code>-scal</code> with a fixed SR.</dd>
     <dt>Faust cert-4</dt><dd>Branch <code>master-dev-certification-4</code> (106dda74a, 2.92.5), exported with <code>git archive</code> and built with the Makefile of <code>build/</code>. <code>-lang ocpp</code> in IEEE (<code>-ffp-contract=off</code>), with the default contract and with <code>-ffast-math</code>; options elected by <code>fcautotool</code> compiled with <code>-O3 -ffast-math</code>, as during the election.</dd>
     <dt>Fixed SR</dt><dd>Copy of the faustlibraries libraries where <code>platform.lib</code> defines <code>SR = 48000.0</code> (faust looks for <code>platform.lib</code> next to <code>maths.lib</code> first, hence the full copy).</dd>
-    <dt>CPU targets</dt><dd>onda (LLVM 21) and Apple clang 21 target <code>apple-m4</code>: LLVM 21 does not know the M5. Only the Faust LLVM JIT, built with a newer LLVM, targets <code>apple-m5</code>.</dd>
-    <dt>Harness</dt><dd>One executable per program links the 15 engines, with 16 input and output channels; same buffers, same input (deterministic white noise, 64 blocks cycled), 2000 warm-up blocks, then 21 rounds in shuffled order. Median reported; median absolute deviation below 2 % except additive64 (~2 %).</dd>
-    <dt>Corpus</dt><dd>%%NPROG%% hand-written programs, same algorithm in both languages (same equations, same delay lengths, same order of operations where possible), part of them chosen to exploit a Faust lever (loop splitting in <code>-vec</code>, control-rate computations lifted out of the loop, zero or repeated constants, many delay lines). Three alternative onda writings (fir32, hoa_decoder, mixer16) separate what belongs to the compiler from what belongs to the writing. zita_rev ports exactly <code>re.zita_rev1_stereo(60, f1, f2, t60dc, t60m, 48000)</code> of the checkout. Real idiomatic versions differ: in Faust, an oscillator would use <code>os.osc</code> (table), not <code>sin</code>.</dd>
-    <dt>Limits</dt><dd>A single machine (ARM64, 128-bit NEON); on x86 AVX2/AVX-512, the SLEEF gap should grow and the SLP gap change. Constant parameters (no automation). A single block size.</dd>
+    <dt>Harness</dt><dd>One executable per program links the 15 engines, with 16 input and output channels; same buffers, same input (deterministic white noise, 64 blocks cycled), 2000 warm-up blocks, then 21 rounds in shuffled order. Median time per frame reported.</dd>
+    <dt>Corpus</dt><dd>%%NPROG%% paired Onda and Faust implementations, including oscillators, filters, delays, and physical models.</dd>
+    <dt>Limits</dt><dd>One machine, fixed parameters, and one block size.</dd>
   </dl>
 </section>
 
 <section>
   <h2>Sources</h2>
-  <p class="prose note">The 22 programs, Faust on the left, Onda on the right, in table order.</p>
+  <p class="prose note">Faust on the left and Onda on the right, in table order.</p>
 %%SOURCES%%
 </section>
 </main>
@@ -189,7 +139,9 @@ tr.variant td.best { background: transparent; }
   const svg = document.getElementById('bars');
   const W = 760, rowH = 34, top = 30, left = 120, right = 24, H = top + data.length * rowH + 30;
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const lo = Math.log(0.25), hi = Math.log(6);
+  const ratios = data.flatMap(({ s, f }) => [s, f]);
+  const lo = Math.log(Math.min(0.25, Math.min(...ratios) / 1.3));
+  const hi = Math.log(Math.max(6, Math.max(...ratios) * 1.3));
   const x = v => left + (Math.log(v) - lo) / (hi - lo) * (W - left - right);
   const ns = 'http://www.w3.org/2000/svg';
   const el = (t, a, txt) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); if (txt) e.textContent = txt; svg.appendChild(e); return e; };

@@ -1,84 +1,53 @@
-# 32 Schroeder allpass combs in series (as fi.allpass_comb), alternating +-0.6.
-ins 1
+# Factor the direct signal path of each allpass and express the fused operation.
 
-namespace df<M = 2>:
-  struct Allpass:
-    buf: f32[M]
-    idx: i32 {M, wrap}
+const Delays: i32[32] = [
+  113, 127, 137, 149, 157, 173, 191, 211, 223, 239, 263, 283, 307, 337, 367, 397, 431, 467, 509,
+  557, 599, 653, 709, 769, 839, 911, 991, 1087, 1171, 1277, 1381, 1499
+]
 
-    def tick(self, x: f32, a: f32):
-      r = self.buf[self.idx]
-      u = x - a * r
-      self.buf[self.idx] = u
-      self.idx += 1
-      return r + a * u
+namespace Allpass<Length = 2>:
+  struct Stage:
+    history: f32[Length]
+    cursor: i32 {Length, wrap}
+
+    def tick(self, signal: f32, gain: f32):
+      delayed = self.history[self.cursor]
+      stored = fma(-gain, delayed, signal)
+      self.history[self.cursor] = stored
+      self.cursor += 1
+      return fma(gain, signal, (1.0 - gain * gain) * delayed)
+
+namespace Section<First = 0>:
+  struct Stages:
+    a: Allpass<Delays[First]>::Stage
+    b: Allpass<Delays[First + 1]>::Stage
+    c: Allpass<Delays[First + 2]>::Stage
+    d: Allpass<Delays[First + 3]>::Stage
+
+    def tick(self, signal: f32):
+      a = self.a.tick(signal, 0.6)
+      b = self.b.tick(a, -0.6)
+      c = self.c.tick(b, 0.6)
+      return self.d.tick(c, -0.6)
 
 init:
-  ap0 = df<113>::Allpass()
-  ap1 = df<127>::Allpass()
-  ap2 = df<137>::Allpass()
-  ap3 = df<149>::Allpass()
-  ap4 = df<157>::Allpass()
-  ap5 = df<173>::Allpass()
-  ap6 = df<191>::Allpass()
-  ap7 = df<211>::Allpass()
-  ap8 = df<223>::Allpass()
-  ap9 = df<239>::Allpass()
-  ap10 = df<263>::Allpass()
-  ap11 = df<283>::Allpass()
-  ap12 = df<307>::Allpass()
-  ap13 = df<337>::Allpass()
-  ap14 = df<367>::Allpass()
-  ap15 = df<397>::Allpass()
-  ap16 = df<431>::Allpass()
-  ap17 = df<467>::Allpass()
-  ap18 = df<509>::Allpass()
-  ap19 = df<557>::Allpass()
-  ap20 = df<599>::Allpass()
-  ap21 = df<653>::Allpass()
-  ap22 = df<709>::Allpass()
-  ap23 = df<769>::Allpass()
-  ap24 = df<839>::Allpass()
-  ap25 = df<911>::Allpass()
-  ap26 = df<991>::Allpass()
-  ap27 = df<1087>::Allpass()
-  ap28 = df<1171>::Allpass()
-  ap29 = df<1277>::Allpass()
-  ap30 = df<1381>::Allpass()
-  ap31 = df<1499>::Allpass()
+  section0 = Section<0>::Stages()
+  section1 = Section<4>::Stages()
+  section2 = Section<8>::Stages()
+  section3 = Section<12>::Stages()
+  section4 = Section<16>::Stages()
+  section5 = Section<20>::Stages()
+  section6 = Section<24>::Stages()
+  section7 = Section<28>::Stages()
 
 sample:
-  x = in1
-  x = ap0.tick(x, 0.6)
-  x = ap1.tick(x, -0.6)
-  x = ap2.tick(x, 0.6)
-  x = ap3.tick(x, -0.6)
-  x = ap4.tick(x, 0.6)
-  x = ap5.tick(x, -0.6)
-  x = ap6.tick(x, 0.6)
-  x = ap7.tick(x, -0.6)
-  x = ap8.tick(x, 0.6)
-  x = ap9.tick(x, -0.6)
-  x = ap10.tick(x, 0.6)
-  x = ap11.tick(x, -0.6)
-  x = ap12.tick(x, 0.6)
-  x = ap13.tick(x, -0.6)
-  x = ap14.tick(x, 0.6)
-  x = ap15.tick(x, -0.6)
-  x = ap16.tick(x, 0.6)
-  x = ap17.tick(x, -0.6)
-  x = ap18.tick(x, 0.6)
-  x = ap19.tick(x, -0.6)
-  x = ap20.tick(x, 0.6)
-  x = ap21.tick(x, -0.6)
-  x = ap22.tick(x, 0.6)
-  x = ap23.tick(x, -0.6)
-  x = ap24.tick(x, 0.6)
-  x = ap25.tick(x, -0.6)
-  x = ap26.tick(x, 0.6)
-  x = ap27.tick(x, -0.6)
-  x = ap28.tick(x, 0.6)
-  x = ap29.tick(x, -0.6)
-  x = ap30.tick(x, 0.6)
-  x = ap31.tick(x, -0.6)
-  out1 = x
+  signal = in1
+  signal = section0.tick(signal)
+  signal = section1.tick(signal)
+  signal = section2.tick(signal)
+  signal = section3.tick(signal)
+  signal = section4.tick(signal)
+  signal = section5.tick(signal)
+  signal = section6.tick(signal)
+  signal = section7.tick(signal)
+  out1 = signal

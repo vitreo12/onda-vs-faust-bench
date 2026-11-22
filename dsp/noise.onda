@@ -5,8 +5,9 @@ init:
   seed: i32 = 0
   lp = 0.0
 
-sample:
-  seed = seed * 1103515245 + 12345
-  x = f32(seed) * (1.0 / 2147483647.0)
-  lp = x * (1.0 - damp) + lp * damp
-  out1 = lp
+block:
+  feed = (1.0 - damp) * (1.0 / 2147483647.0)
+  sample:
+    seed = seed * 1103515245 + 12345
+    lp = fma(lp, damp, f32(seed) * feed)
+    out1 = lp

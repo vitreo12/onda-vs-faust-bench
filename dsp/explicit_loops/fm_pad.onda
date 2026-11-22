@@ -1,0 +1,52 @@
+# Separate waveform evaluation from phase updates to vectorize across frames.
+# Two detuned 2-operator FM voices through a tanh shaper: cheap phase recursions,
+# heavy recursion-free math (4 sin + 2 tanh per sample).
+
+params:
+  freq = 220.0 {20.0, 2000.0}
+  ratio = 1.5 {0.25, 8.0}
+  index = 3.0 {0.0, 10.0}
+  drive = 2.0 {1.0, 10.0}
+  detune = 1.003 {1.0, 1.02}
+
+init:
+  carrier_phase1 = 0.0
+  modulator_phase1 = 0.0
+  carrier_phase2 = 0.0
+  modulator_phase2 = 0.0
+
+block:
+  carrier_step1 = freq / SR
+  modulator_step1 = freq * ratio / SR
+  carrier_step2 = freq * detune / SR
+  modulator_step2 = freq * detune * ratio / SR
+  carrier1: f32[BS]
+  modulator1: f32[BS]
+  carrier2: f32[BS]
+  modulator2: f32[BS]
+  for i in 0..BS:
+    carrier_phase1 += carrier_step1
+    carrier_phase1 -= floor(carrier_phase1)
+    modulator_phase1 += modulator_step1
+    modulator_phase1 -= floor(modulator_phase1)
+    carrier_phase2 += carrier_step2
+    carrier_phase2 -= floor(carrier_phase2)
+    modulator_phase2 += modulator_step2
+    modulator_phase2 -= floor(modulator_phase2)
+    carrier1[i] = carrier_phase1
+    modulator1[i] = modulator_phase1
+    carrier2[i] = carrier_phase2
+    modulator2[i] = modulator_phase2
+
+  rendered: f32[BS]
+  for i in 0..BS:
+    mod1 = sin(TWO_PI * modulator1[i])
+    mod2 = sin(TWO_PI * modulator2[i])
+    tone1 = sin(TWO_PI * carrier1[i] + index * mod1)
+    tone2 = sin(TWO_PI * carrier2[i] + index * mod2)
+    rendered[i] = 0.25 * (tanh(drive * tone1) + tanh(drive * tone2))
+
+  frame = 0 {BS, wrap}
+  sample:
+    out1 = rendered[frame]
+    frame += 1

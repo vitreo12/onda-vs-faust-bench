@@ -1,0 +1,25 @@
+params:
+  freq = 440.0 {20, 10000, scale = log}
+  level = 0.6 {0.0, 1.0}
+
+init:
+  phase = 0.0
+
+block:
+  incr = freq * TWO_PI / SR
+
+  angles: f32[BS]
+  for i in 0..BS:
+    angles[i] = phase
+    phase = phase + incr
+    if phase > TWO_PI:
+      phase = phase - TWO_PI
+
+  wave: f32[BS]
+  for i in 0..BS:
+    wave[i] = sin(angles[i]) * level
+
+  frame = 0 {BS, wrap}
+  sample:
+    out1 = wave[frame]
+    frame += 1

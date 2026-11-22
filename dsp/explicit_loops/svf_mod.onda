@@ -1,0 +1,48 @@
+# Compute modulation coefficients before stepping the feedback state.
+
+params:
+  base = 800.0 {50.0, 5000.0}
+  depth = 2.0 {0.0, 4.0}
+  rate = 0.5 {0.01, 20.0}
+  q = 2.0 {0.5, 20.0}
+
+init:
+  phase = 0.0
+  ic1 = 0.0
+  ic2 = 0.0
+
+block:
+  increment = rate / SR
+  k = 1.0 / q
+  log_depth = log(2.0) * depth
+  angle_base = PI * base / SR
+  angles: f32[BS]
+  for i in 0..BS:
+    phase += increment
+    # At 40 Hz and above, the maximum increment is half a turn.
+    if SR >= 40:
+      if phase >= 1.0:
+        phase -= 1.0
+    else:
+      phase -= floor(phase)
+    angles[i] = TWO_PI * phase
+
+  a1: f32[BS]
+  a2: f32[BS]
+  a3: f32[BS]
+  for i in 0..BS:
+    lfo = sin(angles[i])
+    g = tan(angle_base * exp(log_depth * lfo))
+    a1[i] = 1.0 / fma(g, g + k, 1.0)
+    a2[i] = g * a1[i]
+    a3[i] = g * a2[i]
+
+  frame = 0 {BS, wrap}
+  sample:
+    v3 = in1 - ic2
+    v1 = fma(a1[frame], ic1, a2[frame] * v3)
+    v2 = fma(a2[frame], ic1, fma(a3[frame], v3, ic2))
+    ic1 = 2.0 * v1 - ic1
+    ic2 = 2.0 * v2 - ic2
+    out1 = v2
+    frame += 1

@@ -18,79 +18,41 @@ params:
   outGain = 0.5 {0.0, 1.0}
   gate = 1.0 {0.0, 1.0}
 
-const C = 340.0                        # pm.speedOfSound
-const NMAX: i32 = 427                  # int(l2s(pm.maxLength) + 4), the de.fdelay4 bound at 48 kHz
+import common/waveguide
 
-const def sine_table() -> f32[65536]:  # os.osc's table, sin(2 pi i / 65536)
-  t: f32[65536]
-  for i in 0..65536:
-    t[i] = sin(f32(i) * TWO_PI / 65536.0)
-  return t
+use waveguide<CheckInterior = 1>
 
-const SINE: f32[65536] = sine_table()
-
-# si.smooth (error form): y = x + e, e = pole * (e + x[n-1] - x)
-struct Smooth:
-  e = 0.0
-  xp = 0.0
-
-  def tick(self, x: f32, pole: f32):
-    self.e = pole * (self.e + (self.xp - x))
-    self.xp = x
-    return x + self.e
-
-# One bore direction: a delay line read by 4th-order Lagrange interpolation (de.fdelay4).
-struct Line:
-  buf: f32[2048]
-  w = 0 {2048, wrap}
-
-  def write(self, x: f32):
-    self.w += 1
-    self.buf[self.w] = x
-
-  def read4(self, taps: i32[5], fd: f32):
-    a = fd - 1.0
-    b = fd - 2.0
-    c = fd - 3.0
-    e = fd - 4.0
-    p1 = fd * a
-    p2 = p1 * b
-    p3 = p2 * c
-    x0 = self.buf[(self.w - taps[0]) & 2047]
-    x1 = self.buf[(self.w - taps[1]) & 2047]
-    x2 = self.buf[(self.w - taps[2]) & 2047]
-    x3 = self.buf[(self.w - taps[3]) & 2047]
-    x4 = self.buf[(self.w - taps[4]) & 2047]
-    return e * (c * (b * (0.041666668 * x0 * a - 0.16666667 * fd * x1) + 0.25 * p1 * x2) - 0.16666667 * p2 * x3) + 0.041666668 * p3 * x4
+const C = 340.0  # pm.speedOfSound
 
 init:
+  cursor = 0 {Capacity, wrap}
   bendSmooth = Smooth()
   gatePrev = 0.0
   env = Smooth()
-  phase = 0                            # os.osc phasor: 30-bit integer part ...
-  phaseFrac = 0                        # ... and 24-bit fraction
-  seed: i32 = 0                        # no.noise
-  s1 = 0.0                             # breath lowpass (fi.lowpass(2, 2000), TPT SVF)
+  phase = 0  # os.osc phasor: 30-bit integer part ...
+  phaseFrac = 0  # ... and 24-bit fraction
+  seed: i32 = 0  # no.noise
+  s1 = 0.0  # breath lowpass (fi.lowpass(2, 2000), TPT SVF)
   s2 = 0.0
-  toMouth = Line()                     # wave travelling from the bell to the reed
-  toBell = Line()                      # wave travelling from the reed to the bell
+  toMouth = Line()  # wave travelling from the bell to the reed
+  toBell = Line()  # wave travelling from the reed to the bell
   bell = Smooth()
-  boreIn = 0.0                         # toMouth output, one sample late
-  mouth = 0.0                          # pressure at the reed, previous sample
-  bellOut = 0.0                        # toBell output reaching the bell
-  bellIn = 0.0                         # toBell output read this sample
+  boreIn = 0.0  # toMouth output, one sample late
+  mouth = 0.0  # pressure at the reed, previous sample
+  bellOut = 0.0  # toBell output reaching the bell
+  bellIn = 0.0  # toBell output read this sample
   # breath lowpass coefficients
   g = tan(max(0.0, min(PI * 2000.0 / SR, 1.5676547)))
   gk = g + 1.4142135
   c1 = g * min(340282350000000000000000000000000000000.0, 1.0 / (g * gk + 1.0))
 
 block:
-  pb = pow(bellOpening, 44100.0 / SR)                       # bell pole
+  pb = pow(bellOpening, 44100.0 / SR)  # bell pole
   loopDelay = C / SR * (0.964 * (pb / max(1.0 - pb, 0.01)) + 5.99)
   ratio = pow(2.0, 0.083333336 * bend)
   gt = min(1.0, gate + sustain)
   vg = 0.01 * vibratoGain
-  inc = 1073741824.0 * (1.0 / SR) * vibratoFreq            # 2^30 * f / SR
+  inc = 1073741824.0 * (1.0 / SR) * vibratoFreq  # 2^30 * f / SR
   incInt = i32(floor(inc))
   incFrac = i32(16777216.0 * (inc - floor(inc)))
   target = gain * gt
@@ -99,15 +61,16 @@ block:
   if abs(tau) >= 0.00000011920929:
     envPole = exp(-((1.0 / SR) / tau))
   slope = 0.26 * reedStiffness - 0.44
+  if gt != gatePrev && gt != 0.0:
+    bendSmooth.e = 0.0
+    bendSmooth.xp = ratio
+  gatePrev = gt
   sample:
     # bell: the wave leaving the bore comes back through the smoother
-    toMouth.write(bell.tick(bellOut, pb))
+    cursor += 1
+    toMouth.write(cursor, bell.tick(bellOut, pb))
     # pitch: bend (si.polySmooth), vibrato (os.osc), envelope
-    hold = 0.0
-    if gt == gatePrev || gt == 0.0:
-      hold = 0.999
-    gatePrev = gt
-    bendRatio = bendSmooth.tick(ratio, hold)
+    bendRatio = bendSmooth.tick(ratio, 0.999)
     vib = SINE[(phase >> 6) >> 8]
     phaseFrac += incFrac
     phase = (incInt + phase + (phaseFrac >> 24)) & 1073741823
@@ -115,15 +78,9 @@ block:
     e = env.tick(target, envPole)
     halfLength = 170.0 / freq / (bendRatio * (1.0 + vg * vib * e))
     d = 0.0014705883 * SR * max(1020.0 / SR, halfLength - loopDelay)
-    # de.fdelay4 taps and fractional part
-    dmo = d - 1.499995
-    fl = floor(dmo)
-    id = i32(min(f32(NMAX), max(-4.0, dmo)))
-    taps: i32[5]
-    for i in 0..5:
-      taps[i] = 1 + min(NMAX, max(0, id + i))
-    fd = d - fl
-    fromBell = toMouth.read4(taps, fd)
+    tap = DelayTap()
+    tap.prepare(d)
+    fromBell = toMouth.read(tap, cursor - 1)
     # blower: pressure + vibrato + breath noise
     seed = 12345 + 1103515245 * seed
     n = 0.0000000004656613 * f32(seed)
@@ -135,12 +92,12 @@ block:
     blow = e + vg * vib + 0.05 * e * lp
     # mouthpiece: reed table on the pressure difference
     p = blow + boreIn
-    toBell.write(blow - mouth * clamp(0.7 - slope * mouth, -1.0, 1.0))
+    toBell.write(cursor, blow - mouth * clamp(0.7 - slope * mouth, -1.0, 1.0))
     mouth = p
     boreIn = fromBell
     # bell side: the toBell output reaches the bell one sample after it is read
     bellOut = bellIn
-    bellIn = toBell.read4(taps, fd)
+    bellIn = toBell.read(tap, cursor - 1)
     out = outGain * bellOut
     out1 = out
     out2 = out

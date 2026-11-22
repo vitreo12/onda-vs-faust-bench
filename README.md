@@ -1,91 +1,66 @@
-# onda vs Faust: benchmark
+# Onda vs Faust benchmark
 
-Compares the native code of onda (AOT object, strict and `--fast-math`) with Faust C++
-(`-scal`/`-vec`, clang with its default contract, `-ffp-contract=off` and `-ffast-math`)
-and the Faust LLVM JIT (`-scal`/`-vec`), on 18 DSP programs written equivalently in both
-languages (`dsp/*.dsp` and `dsp/*.onda`), from oscillators to reverbs and three physical models
-(`pm.clarinet_ui_MIDI`, `pm.violin_ui_MIDI`, `pm.frenchBell_ui`), plus 4 alternative onda writings
-kept out of the means (fir32, hoa_decoder, mixer16 and frenchbell_x, next to fir32c,
-hoa_decoder_x, mixer16_x and frenchbell). The faust of the certification-4 branch rejects the
-violin with the current libraries (its interval analysis cannot bound the `de.fdelay4` index),
-so the violin has no cert-4 columns.
-One variant compiles Faust `-vec` with `-fveclib=Accelerate` (`cpp-vec-acc`). Six others come
-from the faust of the `master-dev-certification-4` branch (`tools/faust-cert4`, 2.92.5):
-`-lang ocpp` (`ocpp`, `ocpp-fm`), the options elected by `fcautotool` (`best-fm`, election in
-`results/autotool/`, redone by `tools/autotune_all.sh`), and the same with SR fixed at 48 kHz
-(`ocpp48`, `best48-fm`, plus `llvm48` for the Faust LLVM JIT). Fixed SR means the `sr48/`
-copy of the libraries, where `platform.lib` says `SR = 48000.0`. Measured in November 2026 on
-an Apple M5: `results/`; report: `report/onda-vs-faust.html`.
+This suite compares native Onda and Faust DSP processing across 18 primary workloads at
+48 kHz with 256-frame audio callbacks. The primary Onda implementations use
+`sample` for audio-rate processing and `block` for shared setup. Six workloads also
+have [explicit vectorized-loop implementations](dsp/explicit_loops/) for comparison. Each Onda source
+is compiled with and without `--fast-math`. Faust candidates include scalar and vector
+C++, the LLVM JIT, and the certification-4 compiler with the recorded autotuner options.
+Fixed-rate Faust builds use the same compile-time sample rate as Onda.
+
+The chart shows a Linux run on an Intel Core i9-14900HX with shared FTZ/DAZ. The strict
+comparison uses `-ffp-contract=off` for Faust C++ and oCPP. The default Faust LLVM JIT
+uses fast arithmetic and is included in the fast comparison. Each bar compares
+median processing time per frame after a finite-output and per-channel error check.
+See the [complete measurements](results/linux-x86_64/current.tsv).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="report/chart-dark.svg">
-  <img alt="onda speedup over the best Faust build, per program, strict IEEE and fast-math, log scale. onda wins on additive64, tanh_drive, noise and zita_rev; Faust wins on freeverb, fdn8, diffuser32, peq10, biquad8, fm_pad and the three physical models. Geometric mean x0.90 strict, x0.78 fast-math." src="report/chart-light.svg">
+  <img alt="Blue bars show Onda wins and orange bars show Faust wins. Solid bars are per-sample Onda and outlined bars are explicit vectorized loops. Stock Faust and pinned cert-4 each have strict and fast-math columns." src="report/chart-light.svg">
 </picture>
 
-| onda against… (geometric mean, 18 programs) | strict IEEE | fast-math |
-| --- | ---: | ---: |
-| Faust 2.95.1 (C++ and LLVM, every option) | ×1.19 | ×1.06 |
-| best Faust, master-dev-certification-4 included | ×0.90 | ×0.78 |
+| Onda schedule | Stock strict | Stock fast | Cert-4 strict | Cert-4 fast |
+| --- | ---: | ---: | ---: | ---: |
+| Per-sample | ×1.92 | ×1.45 | ×1.68 | ×1.47 |
+| Explicit vectorized loops where available | ×2.24 | ×1.69 | ×1.93 | ×1.69 |
 
-Above ×1 onda is faster. Full tables and analysis: `report/onda-vs-faust.html`.
+Stock is Faust 2.95.1 (`955f6e2ad`). The reference benchmark pins cert-4 to Faust
+2.92.5 (`106dda74a`). Each column compares against the fastest eligible build from
+that compiler. A ratio above ×1 means Onda is faster. The geometric means cover 18
+workloads for stock and 17 for cert-4, which could not compile the violin. The
+vectorized-loop means use per-sample timings for workloads with one Onda implementation.
+[Compiler provenance](report/linux-audit.md#machine-and-provenance)
 
-## Requirements
+## Run the benchmark
 
-- A built onda: `tools/build-onda.sh` builds `../onda/target/release/onda` against MacPorts
-  LLVM 21. It goes through a "shadow" prefix (`tools/make-llvm-shadow.sh`) limited to
-  AArch64/ARM/X86/WebAssembly, because onda's `native/target.cpp` shim initializes every
-  target of the LLVM installation (AMDGPU, etc.), which `build.rs` does not link. Otherwise:
-  `ONDA=/path/to/onda ./build.sh ...`.
-- `tools/faust-cert4`, the faust of the `master-dev-certification-4` branch, not versioned:
-  `tools/build-faust-cert4.sh` rebuilds it from `/Users/letz/faust` (`git archive`, the
-  working tree is not touched). `sr48/` (libraries with a fixed SR) is recreated by
-  `tools/make-sr48.sh`, which `build.sh` calls when it is missing.
-- `faust` and `/usr/local/lib/libfaustwithllvm.a` (with libz, libzstd, libxml2, libncurses
-  from MacPorts in `/opt/local/lib`).
-- `llvm-objcopy` from LLVM 21 (`/opt/local/libexec/llvm-21/bin`), to rename the symbols of
-  the strict and fast-math onda objects, which export the same names.
-- The Faust libraries of the `../faustlibraries` checkout (`FAUSTLIB` in `build.sh`;
-  zita_rev depends on them).
-
-## Usage
+The [Linux runner instructions](tools/linux/README.md#run-and-inspect) describe how to
+build the compiler versions used here and set `faust_args`. The runner uses the primary
+sources directly from [`dsp/`](dsp/) and measures them alongside any matching
+[`dsp/explicit_loops/`](dsp/explicit_loops/) implementation in the same timing rounds.
 
 ```bash
-./build.sh zita_rev                  # build/zita_rev/bench
-cd build/zita_rev && ./bench ../../dsp/zita_rev.dsp zita_rev 21
+python3 tools/linux/run.py "${faust_args[@]}" --cpu 12 --flush-denormals --out build/run
+python3 report/readme_chart.py . --linux-results build/run/results.tsv \
+  --machine 'Intel Core i9-14900HX, Linux x86-64, FTZ/DAZ'
 ```
 
-Output, one line per engine: program, engine, median ns/sample, minimum, median absolute
-deviation, maximum and relative RMS difference against `cpp-scal`, finiteness, RMS of the
-reference.
+Compilation, initialization, warmup, and output validation happen before timing. The Onda
+harness calls the raw processor entry point and checks its execution status. Each run
+interleaves the engine order and records median absolute deviation alongside the median.
+The chart only ranks finite results with worst-channel relative RMS error at or below
+0.001 against strict scalar Faust.
 
-```bash
-./run_all.sh                         # the 22 programs in two passes, ~60 min
-```
+On macOS, `./run_all.sh` times the per-sample sources and writes its report to `build/macos/`.
 
-`run_all.sh` regenerates `results/` and `report/onda-vs-faust.html`. The second pass
-compiles the strict C++ variants with `-ffp-contract=off` (the "IEEE" columns).
-Measure on an idle machine, on AC power.
+## Sources and earlier measurements
 
-## Files
+The [optimization report](report/optimized-18.md) describes the measured source choices.
+The [sine benchmark](dsp/sine.onda) uses Onda’s basic sine example verbatim, with the same
+per-sample oscillator and default controls in [Faust](dsp/sine.dsp).
+The [Zita benchmark](dsp/zita_rev.onda) uses the standalone patch’s shared cursor and
+interleaved delay rings with the Faust benchmark’s wet signal path, damping and predelay.
 
-| File | Role |
-| --- | --- |
-| `harness.cpp` | Links the 15 engines (16 input and output channels), compares the outputs over 4 s, then times interleaved, shuffled rounds |
-| `build.sh` | One program: onda objects, Faust C++ classes, harness |
-| `run_all.sh` | The 22 programs in two passes, then the report and the chart |
-| `report/gen.py`, `report/template.html` | Merge the two passes (`results/results.json`) and generate the HTML report |
-| `report/readme_chart.py` | Draws `report/chart-light.svg` and `report/chart-dark.svg`, the README chart |
-| `tools/dumpir.cpp` | Writes the LLVM IR of a Faust LLVM factory (`writeDSPFactoryToIRFile`) |
-| `tools/faust-cert4*.sh` | cert-4 faust with the faustlibraries libraries, or with `sr48/` |
-| `tools/build-faust-cert4.sh`, `tools/make-sr48.sh` | Recreate the two generated, unversioned items |
-| `tools/autotune_all.sh` | Elects the options of each program with `fcautotool` (~6 min) |
-| `tools/ctime.cpp` | Time to create a Faust LLVM factory and an instance |
-
-## Method notes
-
-- onda fixes the block size (256) and the sample rate (48 kHz) at compile time;
-  Faust gets `compute(256, ...)` and `init(48000)`.
-- Faust LLVM emits every operation with fast-math flags: its columns are not IEEE.
-  clang contracts into FMA by default.
-- `zita_rev.onda` ports `re.zita_rev1_stereo(60, f1, f2, t60dc, t60m, 48000)` with delay
-  lengths computed for 48 kHz; it is not valid at another rate.
+The [Linux audit](report/linux-audit.md) documents the callback, numerical checks, and
+toolchains. The [original Apple M5 report](report/onda-vs-faust.html) describes the
+[original source revision](https://github.com/sletz/onda-vs-faust-bench/tree/95a4b9bdd20ad8a2dc8039ebfb558c765d91e934)
+and its macOS benchmark procedure.

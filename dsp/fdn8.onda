@@ -1,51 +1,54 @@
-ins 1
+const Lines = 8
+const Capacity = 2048
+
+# The feedback loop contributes the remaining one-sample delay.
+const DelaySamples: i32[Lines] = [1008, 1150, 1278, 1380, 1498, 1606, 1732, 1860]
+
+namespace Butterfly<Half = 1>:
+  def mix(values: f32[Lines]):
+    for group in 0..Lines / (2 * Half):
+      for j in 0..Half:
+        i = group * (2 * Half) + j
+        a = values[i]
+        b = values[i + Half]
+        values[i] = a + b
+        values[i + Half] = a - b
+
 params:
   g = 0.9 {0.0, 0.999}
   damp = 0.3 {0.0, 0.99}
 
-namespace ln<M = 2>:
-  struct Line:
-    buf: f32[M]
-    idx: i32 {M, wrap}
-
-    def tick(self, w: f32):
-      y = self.buf[self.idx]
-      self.buf[self.idx] = w
-      self.idx += 1
-      return y
-
 init:
-  d0 = ln<1008>::Line()
-  d1 = ln<1150>::Line()
-  d2 = ln<1278>::Line()
-  d3 = ln<1380>::Line()
-  d4 = ln<1498>::Line()
-  d5 = ln<1606>::Line()
-  d6 = ln<1732>::Line()
-  d7 = ln<1860>::Line()
-  yp: f32[8]
-  s: f32[8]
+  # Each row holds the samples arriving together. Writes select a future row
+  # using each line's delay, and reads take one contiguous row.
+  history: f32[Lines * Capacity]
+  cursor = 0 {Capacity, wrap}
+  delayed: f32[Lines]
+  lowpass: f32[Lines]
 
 block:
-  gn = g / sqrt(8.0)
+  gain = g / sqrt(f32(Lines))
+  feed = 1.0 - damp
+
   sample:
-    for i in 0..8:
-      s[i] = (1.0 - damp) * yp[i] + damp * s[i]
-    v: f32[8]
-    for i in 0..8:
-      acc = s[0]
-      for j in 1..8:
-        p = i & j
-        par = (p ^ (p >> 1) ^ (p >> 2)) & 1
-        acc += (1.0 - 2.0 * f32(par)) * s[j]
-      v[i] = acc * gn
-    x = in1
-    yp[0] = d0.tick(v[0] + x)
-    yp[1] = d1.tick(v[1] + x)
-    yp[2] = d2.tick(v[2] + x)
-    yp[3] = d3.tick(v[3] + x)
-    yp[4] = d4.tick(v[4] + x)
-    yp[5] = d5.tick(v[5] + x)
-    yp[6] = d6.tick(v[6] + x)
-    yp[7] = d7.tick(v[7] + x)
-    out1 = (yp[0] + yp[1] + yp[2] + yp[3] + yp[4] + yp[5] + yp[6] + yp[7]) * 0.25
+    mixed: f32[Lines]
+    for i in 0..Lines:
+      lowpass[i] = fma(feed, delayed[i], damp * lowpass[i])
+      mixed[i] = lowpass[i]
+
+    # The three butterfly stages implement the eight-line Hadamard mix.
+    Butterfly<1>::mix(mixed)
+    Butterfly<2>::mix(mixed)
+    Butterfly<4>::mix(mixed)
+
+    excitation = in1
+    frame = cursor * Lines
+    for i in 0..Lines:
+      delayed[i] = history[frame + i]
+    for i in 0..Lines:
+      write = (cursor + DelaySamples[i]) {Capacity, wrap}
+      history[write * Lines + i] = fma(mixed[i], gain, excitation)
+    cursor += 1
+    a = (delayed[0] + delayed[1]) + (delayed[2] + delayed[3])
+    b = (delayed[4] + delayed[5]) + (delayed[6] + delayed[7])
+    out1 = 0.25 * (a + b)

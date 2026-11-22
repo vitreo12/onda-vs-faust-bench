@@ -1,39 +1,52 @@
+# Reuse stage histories and factor the equal feed-forward and feedback coefficient.
 # 10-band parametric EQ (RBJ peaking, octave bands from 31.25 Hz, Q = 1.41), direct form I.
-ins 1
 
 params:
   gains: f32[10] = [3.0, -2.0, 4.0, -3.0, 2.0, -4.0, 3.0, -2.0, 1.0, -1.0] {-12.0, 12.0}
 
+const Bands = 10
+
+const def trig() -> f32[2 * Bands]:
+  values: f32[2 * Bands]
+  for i in 0..Bands:
+    angle = TWO_PI * 31.25 * f32(1 << i) / SR
+    values[i] = sin(angle) / (2.0 * 1.41)
+    values[Bands + i] = cos(angle)
+  return values
+
+const Coeff = trig()
+
 init:
-  x1: f32[10]
-  x2: f32[10]
-  y1: f32[10]
-  y2: f32[10]
+  previous: f32[11]
+  older: f32[11]
 
 block:
   b0: f32[10]
   b1: f32[10]
   b2: f32[10]
-  a1: f32[10]
   a2: f32[10]
   for k in 0..10:
     A = pow(10.0, gains[k] / 40.0)
-    w0 = TWO_PI * 31.25 * pow(2.0, f32(k)) / SR
-    al = sin(w0) / (2.0 * 1.41)
-    cw = cos(w0)
+    al = Coeff[k]
+    cw = Coeff[Bands + k]
     a0 = 1.0 + al / A
     b0[k] = (1.0 + al * A) / a0
     b1[k] = -2.0 * cw / a0
     b2[k] = (1.0 - al * A) / a0
-    a1[k] = -2.0 * cw / a0
     a2[k] = (1.0 - al / A) / a0
   sample:
     x = in1
+    x1 = previous[0]
+    x2 = older[0]
+    previous[0] = x
+    older[0] = x1
     for k in 0..10:
-      y = b0[k] * x + b1[k] * x1[k] + b2[k] * x2[k] + (-a1[k] * y1[k] - a2[k] * y2[k])
-      x2[k] = x1[k]
-      x1[k] = x
-      y2[k] = y1[k]
-      y1[k] = y
-      x = y
+      y1 = previous[k + 1]
+      y2 = older[k + 1]
+      past = b1[k] * (x1 - y1) + fma(b2[k], x2, -a2[k] * y2)
+      x = fma(b0[k], x, past)
+      previous[k + 1] = x
+      older[k + 1] = y1
+      x1 = y1
+      x2 = y2
     out1 = x

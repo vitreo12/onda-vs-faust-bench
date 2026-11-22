@@ -1,21 +1,21 @@
-ins 1
+# Store each input’s contributions to future outputs in the transposed FIR form.
 
-const def coeffs() -> f32[32]:
-  values: f32[32]
-  for i in 0..32:
-    values[i] = sin(0.3 * f32(i + 1)) / f32(i + 1)
-  return values
+const TapCount = 32
 
-const C: f32[32] = coeffs()
+const def make_taps() -> f32[TapCount]:
+  taps: f32[TapCount]
+  for i in 0..TapCount:
+    taps[i] = sin(0.3 * f32(i + 1)) / f32(i + 1)
+  return taps
+
+const Taps = make_taps()
 
 init:
-  h: f32[32]
-  idx = 0 {32, wrap}
+  pending: f32[TapCount - 1]
 
 sample:
-  h[idx] = in1
-  acc = 0.0
-  for i in 0..32:
-    acc += C[i] * h[(idx - i) & 31]
-  idx += 1
-  out1 = acc
+  x = in1
+  out1 = fma(Taps[0], x, pending[0])
+  for i in 0..TapCount - 2:
+    pending[i] = fma(Taps[i + 1], x, pending[i + 1])
+  pending[TapCount - 2] = Taps[TapCount - 1] * x

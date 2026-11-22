@@ -1,0 +1,15 @@
+workload	variant	worst_channel_rel_rms
+biquad8	biquad_fused	1.4063577581472193e-06
+clarinet	clarinet_block	4.61840746924505e-07
+diffuser32	diffuser_fused	5.827787129731452e-07
+fdn8	fdn_fused	1.140746937040546e-07
+fir32c	fir_transposed	1.4932601008614013e-07
+frenchbell	frenchbell_decay	0.00012231794986280637
+hoa_decoder_x	hoa_harmonics	9.981133544237669e-08
+noise	noise_skip_ahead	3.2757972031111486e-08
+peq10	peq_fused	0.00047814968185656777
+sine	sine_block	3.6843325102146365e-08
+svf_mod	svf_block	3.462964864068294e-07
+violin	violin_block	2.0568426062163065e-06
+fdn8	fdn_arrivals	1.14408665756061e-07
+svf_mod	svf_bounded_phase	3.534996606741989e-07

@@ -10,10 +10,13 @@ init:
 block:
   inc = freq / SR
   sample:
-    acc = 0.0
+    partials: f32[64]
     for k in 0..64:
       p = phase[k] + inc * f32(k + 1)
       p -= floor(p)
       phase[k] = p
-      acc += sin(TWO_PI * p) * amp[k]
+      partials[k] = sin(TWO_PI * p) * amp[k]
+    acc = 0.0
+    for k in 0..64:
+      acc += partials[k]
     out1 = acc * 0.1

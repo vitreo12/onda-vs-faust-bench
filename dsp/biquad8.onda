@@ -1,4 +1,5 @@
-ins 1
+# Compute delayed terms independently of the cascade’s current input.
+
 params:
   cutoff = 1000.0 {20.0, 20000.0}
   q = 0.707 {0.1, 10.0}
@@ -15,13 +16,16 @@ block:
   b0 = (1.0 - cw) * 0.5 / a0
   b1 = (1.0 - cw) / a0
   b2 = b0
-  a1 = -2.0 * cw / a0
-  a2 = (1.0 - alpha) / a0
+  feedback1 = 2.0 * cw / a0
+  feedback2 = -(1.0 - alpha) / a0
   sample:
     x = in1
     for i in 0..8:
-      w = x + (-a1 * w1[i] - a2 * w2[i])
-      x = b0 * w + b1 * w1[i] + b2 * w2[i]
+      past1 = w1[i]
+      past2 = w2[i]
+      feed = fma(b1, past1, b2 * past2)
+      w = x + (fma(feedback1, past1, feedback2 * past2))
+      x = fma(b0, w, feed)
       w2[i] = w1[i]
       w1[i] = w
     out1 = x

@@ -18,82 +18,34 @@ params:
   outGain = 0.5 {0.0, 1.0}
   gate = 1.0 {0.0, 1.0}
 
-const C = 340.0                        # pm.speedOfSound
-const NMAX: i32 = 427                  # int(l2s(pm.maxLength) + 4), the de.fdelay4 bound at 48 kHz
-const RHO_BRIDGE = pow(0.001, 1.0 / (320.0 * 2.0))    # pm.bridgeFilter(0.2, 0.9): t60 = 2 s
-const RHO_NUT = pow(0.001, 1.0 / (320.0 * 18.0))      # pm.bridgeFilter(0.6, 0.1): t60 = 18 s
+import common/waveguide
 
-const def sine_table() -> f32[65536]:  # os.osc's table, sin(2 pi i / 65536)
-  t: f32[65536]
-  for i in 0..65536:
-    t[i] = sin(f32(i) * TWO_PI / 65536.0)
-  return t
+use waveguide
 
-const SINE: f32[65536] = sine_table()
-
-# si.smooth (error form): y = x + e, e = pole * (e + x[n-1] - x)
-struct Smooth:
-  e = 0.0
-  xp = 0.0
-
-  def tick(self, x: f32, pole: f32):
-    self.e = pole * (self.e + (self.xp - x))
-    self.xp = x
-    return x + self.e
-
-# One travelling wave on a string segment: delay line read by 4th-order Lagrange interpolation.
-# advance() moves the write position once per sample, before any access.
-struct Line:
-  buf: f32[2048]
-  w = 0 {2048, wrap}
-
-  def advance(self):
-    self.w += 1
-
-  def write(self, x: f32):
-    self.buf[self.w] = x
-
-  def read4(self, taps: i32[5], extra: i32, fd: f32):
-    a = fd - 1.0
-    b = fd - 2.0
-    c = fd - 3.0
-    e = fd - 4.0
-    p1 = fd * a
-    p2 = p1 * b
-    p3 = p2 * c
-    x0 = self.buf[(self.w - extra - taps[0]) & 2047]
-    x1 = self.buf[(self.w - extra - taps[1]) & 2047]
-    x2 = self.buf[(self.w - extra - taps[2]) & 2047]
-    x3 = self.buf[(self.w - extra - taps[3]) & 2047]
-    x4 = self.buf[(self.w - extra - taps[4]) & 2047]
-    return e * (c * (b * (0.041666668 * x0 * a - 0.16666667 * fd * x1) + 0.25 * p1 * x2) - 0.16666667 * p2 * x3) + 0.041666668 * p3 * x4
-
-# de.fdelay4 taps (5 integer delays) and fractional part for a delay of d samples
-def lagrange_taps(d: f32, taps: i32[5]):
-  id = i32(min(f32(NMAX), max(-4.0, d - 1.499995)))
-  for i in 0..5:
-    taps[i] = min(NMAX, max(0, id + i))
-  return d - floor(d - 1.499995)
+const C = 340.0  # pm.speedOfSound
+const RHO_BRIDGE = pow(0.001, 1.0 / (320.0 * 2.0))  # pm.bridgeFilter(0.2, 0.9): t60 = 2 s
+const RHO_NUT = pow(0.001, 1.0 / (320.0 * 18.0))  # pm.bridgeFilter(0.6, 0.1): t60 = 18 s
 
 init:
+  cursor = 0 {Capacity, wrap}
   bendSmooth = Smooth()
   gatePrev = 0.0
   env = Smooth()
   pos = Smooth()
   press = Smooth()
-  phase = 0                            # os.osc phasor: 30-bit integer part ...
-  phaseFrac = 0                        # ... and 24-bit fraction
-  bridgeToBow = Line()                 # bow-to-bridge segment, wave going to the bow
-  bowToBridge = Line()                 # bow-to-bridge segment, wave going to the bridge
-  bowToNut = Line()                    # nut-to-bow segment, wave going to the nut
-  nutToBow = Line()                    # nut-to-bow segment, wave going to the bow
-  fromBridge = 0.0                     # waves reaching the bow, previous sample
+  phase = 0  # os.osc phasor: 30-bit integer part ...
+  phaseFrac = 0  # ... and 24-bit fraction
+  bridgeToBow = Line()  # bow-to-bridge segment, wave going to the bow
+  bowToBridge = Line()  # bow-to-bridge segment, wave going to the bridge
+  bowToNut = Line()  # nut-to-bow segment, wave going to the nut
+  nutToBow = Line()  # nut-to-bow segment, wave going to the bow
+  fromBridge = 0.0  # waves reaching the bow, previous sample
   fromNut = 0.0
-  atNut: f32[4]                        # wave reaching the nut, history (pm.bridgeFilter taps)
+  atNut: f32[4]  # wave reaching the nut, history (pm.bridgeFilter taps)
   atNutIn = 0.0
-  atBridge: f32[4]                     # wave reaching the bridge, history
+  atBridge: f32[4]  # wave reaching the bridge, history
   atBridgeIn = 0.0
-  s1 = 0.0                             # body resonance (fi.resonbp(500, 2, 1))
+  s1 = 0.0  # body resonance (fi.resonbp(500, 2, 1))
   s2 = 0.0
   g = tan(max(0.0, min(PI * 500.0 / SR, 1.5676547)))
   gc = g * min(340282350000000000000000000000000000000.0, 1.0 / (g * (g + 0.5) + 1.0))
@@ -103,7 +55,7 @@ block:
   ratio = pow(2.0, 0.083333336 * bend)
   gt = min(1.0, gate + sustain)
   vg = 0.01 * vibratoGain
-  inc = 1073741824.0 * (1.0 / SR) * vibratoFrequency       # 2^30 * f / SR
+  inc = 1073741824.0 * (1.0 / SR) * vibratoFrequency  # 2^30 * f / SR
   incInt = i32(floor(inc))
   incFrac = i32(16777216.0 * (inc - floor(inc)))
   target = gain * gt
@@ -111,20 +63,17 @@ block:
   envPole = 0.0
   if abs(tau) >= 0.00000011920929:
     envPole = exp(-((1.0 / SR) / tau))
-  smoo = 1.0 - 44.1 / SR                                    # si.smoo
+  smoo = 1.0 - 44.1 / SR  # si.smoo
+  if gt != gatePrev && gt != 0.0:
+    bendSmooth.e = 0.0
+    bendSmooth.xp = ratio
+  gatePrev = gt
   sample:
-    bridgeToBow.advance()
-    bowToBridge.advance()
-    bowToNut.advance()
-    nutToBow.advance()
+    cursor += 1
     # bridge reflection: -pm.bridgeFilter(0.2, 0.9)
-    bridgeToBow.write(-RHO_BRIDGE * (0.6 * atBridge[2] + 0.2 * (atBridge[1] + atBridge[3])))
+    bridgeToBow.write(cursor, -RHO_BRIDGE * (0.6 * atBridge[2] + 0.2 * (atBridge[1] + atBridge[3])))
     # pitch: bend (si.polySmooth), vibrato (os.osc), envelope (bow velocity)
-    hold = 0.0
-    if gt == gatePrev || gt == 0.0:
-      hold = 0.999
-    gatePrev = gt
-    bendRatio = bendSmooth.tick(ratio, hold)
+    bendRatio = bendSmooth.tick(ratio, 0.999)
     vib = SINE[(phase >> 6) >> 8]
     phaseFrac += incFrac
     phase = (incInt + phase + (phaseFrac >> 24)) & 1073741823
@@ -132,23 +81,25 @@ block:
     velocity = env.tick(target, envPole)
     stringLength = C / freq / (bendRatio * (1.0 + vg * vib * velocity)) - 12.0 * C / SR
     p = pos.tick(position, smoo)
-    lower: i32[5]
-    fdLower = lagrange_taps(0.0014705883 * SR * stringLength * ((1.0 - position) - pos.e), lower)
-    upper: i32[5]
-    fdUpper = lagrange_taps(0.0014705883 * SR * stringLength * p, upper)
-    reachBow = bridgeToBow.read4(lower, 1, fdLower)
-    reachNut = bowToNut.read4(upper, 1, fdUpper)
+    lower = DelayTap()
+    lower.prepare(0.0014705883 * SR * stringLength * ((1.0 - position) - pos.e))
+    upper = DelayTap()
+    upper.prepare(0.0014705883 * SR * stringLength * p)
+    reachBow = bridgeToBow.read(lower, cursor - 1)
+    reachNut = bowToNut.read(upper, cursor - 1)
     # nut reflection: -pm.bridgeFilter(0.6, 0.1)
     atNut[0] = atNutIn
-    nutToBow.write(-RHO_NUT * (0.8 * atNut[2] + 0.1 * (atNut[1] + atNut[3])))
-    reachBowFromNut = nutToBow.read4(upper, 2, fdUpper)
+    nutToBow.write(cursor, -RHO_NUT * (0.8 * atNut[2] + 0.1 * (atNut[1] + atNut[3])))
+    reachBowFromNut = nutToBow.read(upper, cursor - 2)
     # bow: velocity difference through the bow table
     dv = velocity - (fromBridge + fromNut)
     slope = 5.0 - 4.0 * press.tick(pressure, smoo)
-    f = dv * min(1.0, pow(0.75 + abs(dv * slope), -4.0))
-    bowToNut.write(fromBridge + f)
-    bowToBridge.write(fromNut + f)
-    reachBridge = bowToBridge.read4(lower, 0, fdLower)
+    bow = 0.75 + abs(dv * slope)
+    bow_squared = bow * bow
+    f = dv * min(1.0, 1.0 / (bow_squared * bow_squared))
+    bowToNut.write(cursor, fromBridge + f)
+    bowToBridge.write(cursor, fromNut + f)
+    reachBridge = bowToBridge.read(lower, cursor)
     # body resonance on the wave reaching the bridge
     atBridge[0] = atBridgeIn
     v1 = s1 + gc * (atBridge[1] + gk * s1 - s2)

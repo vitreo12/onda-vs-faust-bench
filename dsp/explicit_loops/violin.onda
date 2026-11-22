@@ -1,0 +1,138 @@
+# pm.violin_ui_MIDI of Faust's physmodels.lib (examples/physicalModeling/violinMIDI.dsp) ported
+# to Onda, gate held at 1 like violin.dsp. Bowed string: two string segments (nut to bow, bow to
+# bridge), each a pair of fractional delay lines read by 4th-order Lagrange interpolation
+# (de.fdelay4); nut and bridge reflections (pm.bridgeFilter); bow table; body resonance
+# (fi.resonbp at 500 Hz, TPT state variable filter).
+include "../common/waveguide.onda"
+
+use waveguide<CheckInterior = 1>
+
+params:
+  freq = 440.0 {50.0, 1000.0}
+  bend = 0.0 {-2.0, 2.0}
+  gain = 0.6 {0.0, 1.0}
+  envAttack = 1.0 {0.0, 30.0}
+  sustain = 0.0 {0.0, 1.0}
+  pressure = 0.5 {0.0, 1.0}
+  position = 0.7 {0.0, 1.0}
+  vibratoFrequency = 6.0 {1.0, 10.0}
+  vibratoGain = 0.5 {0.0, 1.0}
+  outGain = 0.5 {0.0, 1.0}
+  gate = 1.0 {0.0, 1.0}
+
+const C = 340.0  # pm.speedOfSound
+const NMAX: i32 = 427  # int(l2s(pm.maxLength) + 4), the de.fdelay4 bound at 48 kHz
+const RHO_BRIDGE = pow(0.001, 1.0 / (320.0 * 2.0))  # pm.bridgeFilter(0.2, 0.9): t60 = 2 s
+const RHO_NUT = pow(0.001, 1.0 / (320.0 * 18.0))  # pm.bridgeFilter(0.6, 0.1): t60 = 18 s
+
+init:
+  cursor = 0 {Capacity, wrap}
+  bendSmooth = Smooth()
+  gatePrev = 0.0
+  env = Smooth()
+  pos = Smooth()
+  press = Smooth()
+  phase = 0  # os.osc phasor: 30-bit integer part ...
+  phaseFrac = 0  # ... and 24-bit fraction
+  bridgeToBow = Line()  # bow-to-bridge segment, wave going to the bow
+  bowToBridge = Line()  # bow-to-bridge segment, wave going to the bridge
+  bowToNut = Line()  # nut-to-bow segment, wave going to the nut
+  nutToBow = Line()  # nut-to-bow segment, wave going to the bow
+  fromBridge = 0.0  # waves reaching the bow, previous sample
+  fromNut = 0.0
+  atNut: f32[4]  # wave reaching the nut, history (pm.bridgeFilter taps)
+  atNutIn = 0.0
+  atBridge: f32[4]  # wave reaching the bridge, history
+  atBridgeIn = 0.0
+  s1 = 0.0  # body resonance (fi.resonbp(500, 2, 1))
+  s2 = 0.0
+  g = tan(max(0.0, min(PI * 500.0 / SR, 1.5676547)))
+  gc = g * min(340282350000000000000000000000000000000.0, 1.0 / (g * (g + 0.5) + 1.0))
+  gk = -0.5 - g
+
+block:
+  ratio = pow(2.0, 0.083333336 * bend)
+  gt = min(1.0, gate + sustain)
+  vg = 0.01 * vibratoGain
+  inc = 1073741824.0 * (1.0 / SR) * vibratoFrequency  # 2^30 * f / SR
+  incInt = i32(floor(inc))
+  incFrac = i32(16777216.0 * (inc - floor(inc)))
+  target = gain * gt
+  tau = 0.001 * envAttack
+  envPole = 0.0
+  if abs(tau) >= 0.00000011920929:
+    envPole = exp(-((1.0 / SR) / tau))
+  smoo = 1.0 - 44.1 / SR  # si.smoo
+  if gt != gatePrev && gt != 0.0:
+    bendSmooth.e = 0.0
+    bendSmooth.xp = ratio
+  gatePrev = gt
+  # The pitch and envelope trajectories are independent of the travelling waves.
+  vibrato: f32[BS]
+  velocity_by_frame: f32[BS]
+  pitch: f32[BS]
+  bow_position: f32[BS]
+  bow_complement: f32[BS]
+  bow_slope: f32[BS]
+  for i in 0..BS:
+    bendRatio = bendSmooth.tick(ratio, 0.999)
+    vib = SINE[(phase >> 6) >> 8]
+    phaseFrac += incFrac
+    phase = (incInt + phase + (phaseFrac >> 24)) & 1073741823
+    phaseFrac &= 16777215
+    velocity = env.tick(target, envPole)
+    vibrato[i] = vib
+    velocity_by_frame[i] = velocity
+    pitch[i] = bendRatio
+    bow_position[i] = pos.tick(position, smoo)
+    bow_complement[i] = (1.0 - position) - pos.e
+    bow_slope[i] = 5.0 - 4.0 * press.tick(pressure, smoo)
+
+  lower_delay: f32[BS]
+  upper_delay: f32[BS]
+  for i in 0..BS:
+    stringLength = C / freq / (pitch[i] * (1.0 + vg * vibrato[i] * velocity_by_frame[i])) - 12.0 * C / SR
+    lower_delay[i] = 0.0014705883 * SR * stringLength * bow_complement[i]
+    upper_delay[i] = 0.0014705883 * SR * stringLength * bow_position[i]
+
+  frame = 0 {BS, wrap}
+  sample:
+    cursor += 1
+    # bridge reflection: -pm.bridgeFilter(0.2, 0.9)
+    bridgeToBow.write(cursor, -RHO_BRIDGE * (0.6 * atBridge[2] + 0.2 * (atBridge[1] + atBridge[3])))
+    lower = DelayTap()
+    lower.prepare(lower_delay[frame])
+    upper = DelayTap()
+    upper.prepare(upper_delay[frame])
+    reachBow = bridgeToBow.read(lower, cursor - 1)
+    reachNut = bowToNut.read(upper, cursor - 1)
+    # nut reflection: -pm.bridgeFilter(0.6, 0.1)
+    atNut[0] = atNutIn
+    nutToBow.write(cursor, -RHO_NUT * (0.8 * atNut[2] + 0.1 * (atNut[1] + atNut[3])))
+    reachBowFromNut = nutToBow.read(upper, cursor - 2)
+    # bow: velocity difference through the bow table
+    dv = velocity_by_frame[frame] - (fromBridge + fromNut)
+    slope = bow_slope[frame]
+    bow = 0.75 + abs(dv * slope)
+    bow_squared = bow * bow
+    f = dv * min(1.0, 1.0 / (bow_squared * bow_squared))
+    bowToNut.write(cursor, fromBridge + f)
+    bowToBridge.write(cursor, fromNut + f)
+    reachBridge = bowToBridge.read(lower, cursor)
+    # body resonance on the wave reaching the bridge
+    atBridge[0] = atBridgeIn
+    v1 = s1 + gc * (atBridge[1] + gk * s1 - s2)
+    s1 = 2.0 * v1 - s1
+    s2 = 2.0 * (s2 + g * v1) - s2
+    out = outGain * v1
+    out1 = out
+    out2 = out
+    # one-sample state updates
+    fromBridge = reachBow
+    fromNut = reachBowFromNut
+    atNutIn = reachNut
+    atBridgeIn = reachBridge
+    for k in 0..3:
+      atNut[3 - k] = atNut[2 - k]
+      atBridge[3 - k] = atBridge[2 - k]
+    frame += 1

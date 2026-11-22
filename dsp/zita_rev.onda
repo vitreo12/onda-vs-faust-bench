@@ -1,131 +1,173 @@
-# Port of re.zita_rev1_stereo(60, f1, f2, t60dc, t60m, fsmax) from faustlibraries,
-# delay lengths computed for 48 kHz exactly as reverbs.lib does (floor(0.5 + SR*t)).
-ins 2
-outs 2
+# Zita-Rev1 wet stereo tank. Shared ring cursor and interleaved history are
+# adapted from the standalone Zita patch. Damping, predelay, and output gain
+# follow the companion faustlibraries benchmark.
 
-params:
-  f1 = 200.0 {50.0, 1000.0}
-  f2 = 6000.0 {1500.0, 23520.0}
-  t60dc = 3.0 {1.0, 8.0}
-  t60m = 2.0 {1.0, 8.0}
+const LaneCount = 8
+const DiffusionSeconds = [
+  0.020346, 0.024421, 0.031604, 0.027333, 0.022904, 0.029291, 0.013458, 0.019123
+]
+const LoopSeconds = [0.153129, 0.210389, 0.127837, 0.256891, 0.174713, 0.192303, 0.125000, 0.219991]
+const AllpassGains = [0.6, -0.6, 0.6, -0.6, 0.6, -0.6, 0.6, -0.6]
 
-namespace zr<M = 2>:
-  struct Line:
-    buf: f32[M]
-    idx: i32 {M, wrap}
+const LogGain60 = -6.9077554
+const HadamardScale = 1.0 / sqrt(f32(LaneCount))
+const DampingBias = 0.00000000000000000001
+const PredelayTap = i32(round(0.040 * SR))
 
-    def tick(self, w: f32):
-      y = self.buf[self.idx]
-      self.buf[self.idx] = w
-      self.idx += 1
-      return y
+const def diffusion_taps() -> i32[LaneCount]:
+  taps: i32[LaneCount]
+  for lane in 0..LaneCount:
+    taps[lane] = max(1, i32(round(DiffusionSeconds[lane] * SR)))
+  return taps
 
-  # Schroeder allpass comb (fi.allpass_comb): u = x - a*u[n-M], y = u[n-M] + a*u
-  struct Allpass:
-    buf: f32[M]
-    idx: i32 {M, wrap}
+const DiffusionTaps = diffusion_taps()
 
-    def tick(self, x: f32, a: f32):
-      r = self.buf[self.idx]
-      u = x - a * r
-      self.buf[self.idx] = u
-      self.idx += 1
-      return r + a * u
+const def feedback_taps() -> i32[LaneCount]:
+  taps: i32[LaneCount]
+  for lane in 0..LaneCount:
+    taps[lane] = max(1, i32(round(LoopSeconds[lane] * SR)) - DiffusionTaps[lane])
+  return taps
 
-init:
-  dl = zr<1920>::Line()        # input delay rdel - 20 = 40 ms
-  dr = zr<1920>::Line()
-  ap0 = zr<977>::Allpass()
-  ap1 = zr<1172>::Allpass()
-  ap2 = zr<1517>::Allpass()
-  ap3 = zr<1312>::Allpass()
-  ap4 = zr<1099>::Allpass()
-  ap5 = zr<1406>::Allpass()
-  ap6 = zr<646>::Allpass()
-  ap7 = zr<918>::Allpass()
-  fb0 = zr<6372>::Line()       # tdelay - apdelay - 1 (the loop adds one sample)
-  fb1 = zr<8926>::Line()
-  fb2 = zr<4618>::Line()
-  fb3 = zr<11018>::Line()
-  fb4 = zr<7286>::Line()
-  fb5 = zr<7824>::Line()
-  fb6 = zr<5353>::Line()
-  fb7 = zr<9641>::Line()
-  tdel: f32[8] = [7350.0, 10099.0, 6136.0, 12331.0, 8386.0, 9231.0, 6000.0, 10560.0]
-  hp: f32[8]     # Hadamard outputs of the previous sample
-  s1: f32[8]     # one-pole TPT lowpass states (low shelf)
-  e: f32[8]      # si.smooth error states
-  xp: f32[8]     # si.smooth previous inputs
+const FeedbackTaps = feedback_taps()
 
-block:
-  g1 = tan(max(0.0, min(PI * f1 / SR, 0.499 * PI)))
-  gk = g1 * (1.0 / (g1 + 1.0))
-  gk2 = 2.0 * gk
-  c = cos(TWO_PI * f2 / SR)
-  if f2 > 0.49 * SR:
-    c = -1.0
-  shelf: f32[8]
-  gm: f32[8]
-  pole: f32[8]
-  for i in 0..8:
-    g0 = exp(-6.9077554 * tdel[i] / (t60dc * SR))
-    gM = exp(-6.9077554 * tdel[i] / (t60m * SR))
-    shelf[i] = g0 / gM - 1.0
-    gm[i] = gM
-    gs = gM * gM
-    mbo2 = (1.0 - gs * c) / (1.0 - gs)
-    pole[i] = mbo2 - sqrt(max(0.0, mbo2 * mbo2 - 1.0))
-  t1 = 0.525 / sqrt(t60m)
-  inv = 1.0 / sqrt(8.0)
+const def ring_capacity(max_delay: i32) -> i32:
+  for bit in 1..31:
+    capacity = 1 << bit
+    if capacity > max_delay:
+      return capacity
+  return 0
 
-  sample:
-    # damping filters on the delayed Hadamard outputs
-    z: f32[8]
-    for i in 0..8:
-      x = hp[i]
-      d = x - s1[i]
-      v = s1[i] + gk * d
-      s1[i] = s1[i] + gk2 * d
-      sh = gm[i] * (x + shelf[i] * v)
-      e[i] = pole[i] * (e[i] + (xp[i] - sh))
-      xp[i] = sh
-      z[i] = inv * (sh + e[i]) + 0.00000000000000000001
+const def lane_ring_capacity(taps: i32[LaneCount]) -> i32:
+  longest = 1
+  for lane in 0..LaneCount:
+    longest = max(longest, taps[lane])
+  return ring_capacity(longest)
 
-    xl = 0.3 * dl.tick(in1)
-    xr = 0.3 * dr.tick(in2)
-    q0 = ap0.tick(fb0.tick(z[0]) + xl, 0.6)
-    q1 = ap1.tick(fb1.tick(z[1]) + xl, -0.6)
-    q2 = ap2.tick(fb2.tick(z[2]) - xl, 0.6)
-    q3 = ap3.tick(fb3.tick(z[3]) - xl, -0.6)
-    q4 = ap4.tick(fb4.tick(z[4]) + xr, 0.6)
-    q5 = ap5.tick(fb5.tick(z[5]) + xr, -0.6)
-    q6 = ap6.tick(fb6.tick(z[6]) - xr, 0.6)
-    q7 = ap7.tick(fb7.tick(z[7]) - xr, -0.6)
+const PredelayCapacity = ring_capacity(PredelayTap)
+const DiffusionCapacity = lane_ring_capacity(DiffusionTaps)
+const FeedbackCapacity = lane_ring_capacity(FeedbackTaps)
+const ClockPeriod = max(PredelayCapacity, max(DiffusionCapacity, FeedbackCapacity))
 
-    # ro.hadamard(8): butterfly(8), then hadamard(4) on each half
-    b0 = q0 + q4
-    b1 = q1 + q5
-    b2 = q2 + q6
-    b3 = q3 + q7
-    b4 = q0 - q4
-    b5 = q1 - q5
-    b6 = q2 - q6
-    b7 = q3 - q7
-    c0 = b0 + b2
-    c1 = b1 + b3
-    c2 = b0 - b2
-    c3 = b1 - b3
-    c4 = b4 + b6
-    c5 = b5 + b7
-    c6 = b4 - b6
-    c7 = b5 - b7
-    hp[0] = c0 + c1
-    hp[1] = c0 - c1
-    hp[2] = c2 + c3
-    hp[3] = c2 - c3
-    hp[4] = c4 + c5
-    hp[5] = c4 - c5
-    hp[6] = c6 + c7
-    hp[7] = c6 - c7
-    out1 = (hp[1] + hp[2]) * t1
-    out2 = (hp[1] - hp[2]) * t1
+def butterfly(a, b):
+  return (a + b, a - b)
+
+# Three butterfly stages implement the eight-channel Hadamard matrix.
+def hadamard_mix(lanes):
+  a0, a1 = butterfly(lanes[0], lanes[1])
+  a2, a3 = butterfly(lanes[2], lanes[3])
+  a4, a5 = butterfly(lanes[4], lanes[5])
+  a6, a7 = butterfly(lanes[6], lanes[7])
+
+  b0, b2 = butterfly(a0, a2)
+  b1, b3 = butterfly(a1, a3)
+  b4, b6 = butterfly(a4, a6)
+  b5, b7 = butterfly(a5, a7)
+
+  y0, y4 = butterfly(b0, b4)
+  y1, y5 = butterfly(b1, b5)
+  y2, y6 = butterfly(b2, b6)
+  y3, y7 = butterfly(b3, b7)
+
+  lanes[0] = y0
+  lanes[1] = y1
+  lanes[2] = y2
+  lanes[3] = y3
+  lanes[4] = y4
+  lanes[5] = y5
+  lanes[6] = y6
+  lanes[7] = y7
+
+proc Main:
+  params:
+    f1 = 200.0 {50.0, 1000.0}
+    f2 = 6000.0 {1500.0, 23520.0}
+    t60dc = 3.0 {1.0, 8.0}
+    t60m = 2.0 {1.0, 8.0}
+
+  init:
+    frame = 0 {ClockPeriod, wrap}
+    predelay: f32[2 * PredelayCapacity]
+    diffusion: f32[LaneCount * DiffusionCapacity]
+    feedback: f32[LaneCount * FeedbackCapacity]
+    mixed: f32[LaneCount]
+    low_state: f32[LaneCount]
+    high_state: f32[LaneCount]
+    mid_gain: f32[LaneCount]
+    low_shelf: f32[LaneCount]
+    high_pole: f32[LaneCount]
+    high_weight: f32[LaneCount]
+    low_alpha = 0.0
+    low_step = 0.0
+    level = 0.0
+    previous_f1 = f1
+    previous_f2 = f2
+    previous_t60dc = t60dc
+    previous_t60m = t60m
+    update_decay()
+
+  def update_decay():
+    tangent = tan(max(0.0, min(PI * f1 / SR, 0.499 * PI)))
+    low_alpha = tangent * (1.0 / (tangent + 1.0))
+    low_step = 2.0 * low_alpha
+    damping = cos(TWO_PI * f2 / SR)
+    if f2 > 0.49 * SR:
+      damping = -1.0
+    for lane in 0..LaneCount:
+      samples = round(LoopSeconds[lane] * SR)
+      low = exp(LogGain60 * samples / (t60dc * SR))
+      mid = exp(LogGain60 * samples / (t60m * SR))
+      low_shelf[lane] = low / mid - 1.0
+      mid_gain[lane] = mid
+      power = mid * mid
+      pole_term = (1.0 - power * damping) / (1.0 - power)
+      high_pole[lane] = pole_term - sqrt(max(0.0, pole_term * pole_term - 1.0))
+      high_weight[lane] = 1.0 - high_pole[lane]
+    level = 0.525 / sqrt(t60m)
+
+  block:
+    if f1 != previous_f1 || f2 != previous_f2 || t60dc != previous_t60dc || t60m != previous_t60m:
+      update_decay()
+      previous_f1 = f1
+      previous_f2 = f2
+      previous_t60dc = t60dc
+      previous_t60m = t60m
+
+    sample:
+      pre_write = frame {PredelayCapacity, wrap}
+      pre_read = (pre_write - PredelayTap) {PredelayCapacity, wrap}
+      left = 0.3 * predelay[2 * pre_read]
+      right = 0.3 * predelay[2 * pre_read + 1]
+      predelay[2 * pre_write] = in1
+      predelay[2 * pre_write + 1] = in2
+
+      # All lines advance together, using masked taps into interleaved rings.
+      diffusion_write = frame {DiffusionCapacity, wrap}
+      feedback_write = frame {FeedbackCapacity, wrap}
+      excitation = [left, left, -left, -left, right, right, -right, -right]
+      for lane in 0..LaneCount:
+        diffusion_read = (diffusion_write - DiffusionTaps[lane]) {DiffusionCapacity, wrap}
+        feedback_read = (feedback_write - FeedbackTaps[lane]) {FeedbackCapacity, wrap}
+        delayed = diffusion[diffusion_read * LaneCount + lane]
+        gain = AllpassGains[lane]
+        allpass_input = feedback[feedback_read * LaneCount + lane] + excitation[lane]
+        stored = allpass_input - gain * delayed
+        diffusion[diffusion_write * LaneCount + lane] = stored
+        mixed[lane] = delayed + gain * stored
+
+      hadamard_mix(mixed)
+      for lane in 0..LaneCount:
+        x = mixed[lane]
+        difference = x - low_state[lane]
+        low = fma(low_alpha, difference, low_state[lane])
+        low_state[lane] = fma(low_step, difference, low_state[lane])
+        shaped = mid_gain[lane] * fma(low_shelf[lane], low, x)
+        high_state[lane] = fma(high_pole[lane], high_state[lane], high_weight[lane] * shaped)
+        feedback[feedback_write * LaneCount + lane] = fma(
+          HadamardScale,
+          high_state[lane],
+          DampingBias
+        )
+
+      frame += 1
+      out1 = (mixed[1] + mixed[2]) * level
+      out2 = (mixed[1] - mixed[2]) * level

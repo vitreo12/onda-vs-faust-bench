@@ -1,12 +1,15 @@
 params:
-  freq = 440.0 {20.0, 20000.0}
+  freq = 440.0 {20, 10000, scale = log}
+  level = 0.6 {0.0, 1.0}
 
 init:
   phase = 0.0
 
 block:
-  inc = freq / SR
+  incr = freq * TWO_PI / SR
+
   sample:
-    phase += inc
-    phase -= floor(phase)
-    out1 = sin(TWO_PI * phase) * 0.5
+    out1 = sin(phase) * level
+    phase = phase + incr
+    if phase > TWO_PI:
+      phase = phase - TWO_PI

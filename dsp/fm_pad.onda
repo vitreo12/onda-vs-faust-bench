@@ -8,25 +8,27 @@ params:
   detune = 1.003 {1.0, 1.02}
 
 init:
-  pc1 = 0.0
-  pm1 = 0.0
-  pc2 = 0.0
-  pm2 = 0.0
+  carrier_phase1 = 0.0
+  modulator_phase1 = 0.0
+  carrier_phase2 = 0.0
+  modulator_phase2 = 0.0
 
 block:
-  ic1 = freq / SR
-  im1 = freq * ratio / SR
-  ic2 = freq * detune / SR
-  im2 = freq * detune * ratio / SR
+  carrier_step1 = freq / SR
+  modulator_step1 = freq * ratio / SR
+  carrier_step2 = freq * detune / SR
+  modulator_step2 = freq * detune * ratio / SR
   sample:
-    pc1 += ic1
-    pc1 -= floor(pc1)
-    pm1 += im1
-    pm1 -= floor(pm1)
-    pc2 += ic2
-    pc2 -= floor(pc2)
-    pm2 += im2
-    pm2 -= floor(pm2)
-    v1 = tanh(drive * sin(TWO_PI * pc1 + index * sin(TWO_PI * pm1)))
-    v2 = tanh(drive * sin(TWO_PI * pc2 + index * sin(TWO_PI * pm2)))
-    out1 = (v1 + v2) * 0.25
+    carrier_phase1 += carrier_step1
+    carrier_phase1 -= floor(carrier_phase1)
+    modulator_phase1 += modulator_step1
+    modulator_phase1 -= floor(modulator_phase1)
+    carrier_phase2 += carrier_step2
+    carrier_phase2 -= floor(carrier_phase2)
+    modulator_phase2 += modulator_step2
+    modulator_phase2 -= floor(modulator_phase2)
+    mod1 = sin(TWO_PI * modulator_phase1)
+    mod2 = sin(TWO_PI * modulator_phase2)
+    carrier1 = sin(TWO_PI * carrier_phase1 + index * mod1)
+    carrier2 = sin(TWO_PI * carrier_phase2 + index * mod2)
+    out1 = 0.25 * (tanh(drive * carrier1) + tanh(drive * carrier2))

@@ -1,0 +1,63 @@
+namespace waveguide<CheckInterior = 0>:
+  const MaxTap = 427
+
+  const def sine_table() -> f32[65536]:  # os.osc's table, sin(2 pi i / 65536)
+    t: f32[65536]
+    for i in 0..65536:
+      t[i] = sin(f32(i) * TWO_PI / 65536.0)
+    return t
+
+  const SINE: f32[65536] = sine_table()
+
+  # si.smooth (error form): y = x + e, e = pole * (e + x[n-1] - x)
+  struct Smooth:
+    e = 0.0
+    xp = 0.0
+
+    def tick(self, x: f32, pole: f32):
+      # A held target gives an exact zero input difference.
+      self.e = fma(pole, self.e, pole * (self.xp - x))
+      self.xp = x
+      return x + self.e
+
+  const Capacity = 2048
+
+  struct DelayTap:
+    offset: i32[5]
+    weight: f32[5]
+
+    def prepare(self, delay: f32):
+      shifted = delay - 1.499995
+      whole = i32(min(f32(MaxTap), max(-4.0, shifted)))
+      if CheckInterior == 1 && whole >= 0 && whole <= MaxTap - 4:
+        for i in 0..5:
+          self.offset[i] = whole + i
+      else:
+        for i in 0..5:
+          self.offset[i] = min(MaxTap, max(0, whole + i))
+      frac = delay - floor(shifted)
+      a = frac - 1.0
+      b = frac - 2.0
+      c = frac - 3.0
+      d = frac - 4.0
+      p = frac * a
+      q = p * b
+      self.weight[0] = (a * b) * (c * d) * 0.041666668
+      self.weight[1] = (frac * b) * (c * d) * -0.16666667
+      self.weight[2] = p * (c * d) * 0.25
+      self.weight[3] = q * d * -0.16666667
+      self.weight[4] = q * c * 0.041666668
+
+  struct Line:
+    history: f32[Capacity]
+
+    def write(self, cursor: i32, signal: f32):
+      self.history[cursor] = signal
+
+    def read(self, tap: DelayTap, cursor: i32):
+      index = (cursor - tap.offset[0]) {Capacity, wrap}
+      total = tap.weight[0] * self.history[index]
+      for i in 1..5:
+        read_index = (cursor - tap.offset[i]) {Capacity, wrap}
+        total += tap.weight[i] * self.history[read_index]
+      return total

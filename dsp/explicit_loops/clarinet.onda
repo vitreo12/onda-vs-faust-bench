@@ -1,0 +1,116 @@
+# pm.clarinet_ui_MIDI of Faust's physmodels.lib (examples/physicalModeling/clarinetMIDI.dsp)
+# ported to Onda, gate held at 1 like clarinet.dsp. Blower: pressure envelope + vibrato
+# (os.osc: 65536-point sine table, fixed-point phasor) + low-passed breath noise. Mouthpiece:
+# reed table. Bore: two fractional delay lines read by 4th-order Lagrange interpolation
+# (de.fdelay4). Bell: reflection through a one-pole smoother (si.smooth).
+include "../common/waveguide.onda"
+
+use waveguide<CheckInterior = 1>
+
+params:
+  freq = 440.0 {50.0, 1000.0}
+  bend = 0.0 {-2.0, 2.0}
+  gain = 0.6 {0.0, 1.0}
+  envAttack = 1.0 {0.0, 30.0}
+  sustain = 0.0 {0.0, 1.0}
+  reedStiffness = 0.5 {0.0, 1.0}
+  bellOpening = 0.5 {0.0, 1.0}
+  vibratoFreq = 5.0 {1.0, 10.0}
+  vibratoGain = 0.25 {0.0, 1.0}
+  outGain = 0.5 {0.0, 1.0}
+  gate = 1.0 {0.0, 1.0}
+
+const C = 340.0  # pm.speedOfSound
+const NMAX: i32 = 427  # int(l2s(pm.maxLength) + 4), the de.fdelay4 bound at 48 kHz
+
+init:
+  cursor = 0 {Capacity, wrap}
+  bendSmooth = Smooth()
+  gatePrev = 0.0
+  env = Smooth()
+  phase = 0  # os.osc phasor: 30-bit integer part ...
+  phaseFrac = 0  # ... and 24-bit fraction
+  seed: i32 = 0  # no.noise
+  s1 = 0.0  # breath lowpass (fi.lowpass(2, 2000), TPT SVF)
+  s2 = 0.0
+  toMouth = Line()  # wave travelling from the bell to the reed
+  toBell = Line()  # wave travelling from the reed to the bell
+  bell = Smooth()
+  boreIn = 0.0  # toMouth output, one sample late
+  mouth = 0.0  # pressure at the reed, previous sample
+  bellOut = 0.0  # toBell output reaching the bell
+  bellIn = 0.0  # toBell output read this sample
+  # breath lowpass coefficients
+  g = tan(max(0.0, min(PI * 2000.0 / SR, 1.5676547)))
+  gk = g + 1.4142135
+  c1 = g * min(340282350000000000000000000000000000000.0, 1.0 / (g * gk + 1.0))
+
+block:
+  pb = pow(bellOpening, 44100.0 / SR)  # bell pole
+  loopDelay = C / SR * (0.964 * (pb / max(1.0 - pb, 0.01)) + 5.99)
+  ratio = pow(2.0, 0.083333336 * bend)
+  gt = min(1.0, gate + sustain)
+  vg = 0.01 * vibratoGain
+  inc = 1073741824.0 * (1.0 / SR) * vibratoFreq  # 2^30 * f / SR
+  incInt = i32(floor(inc))
+  incFrac = i32(16777216.0 * (inc - floor(inc)))
+  target = gain * gt
+  tau = 0.001 * envAttack
+  envPole = 0.0
+  if abs(tau) >= 0.00000011920929:
+    envPole = exp(-((1.0 / SR) / tau))
+  slope = 0.26 * reedStiffness - 0.44
+  if gt != gatePrev && gt != 0.0:
+    bendSmooth.e = 0.0
+    bendSmooth.xp = ratio
+  gatePrev = gt
+  # The pitch and envelope trajectories are independent of the travelling waves.
+  vibrato: f32[BS]
+  envelope: f32[BS]
+  pitch: f32[BS]
+  for i in 0..BS:
+    bendRatio = bendSmooth.tick(ratio, 0.999)
+    vib = SINE[(phase >> 6) >> 8]
+    phaseFrac += incFrac
+    phase = (incInt + phase + (phaseFrac >> 24)) & 1073741823
+    phaseFrac &= 16777215
+    e = env.tick(target, envPole)
+    vibrato[i] = vib
+    envelope[i] = e
+    pitch[i] = bendRatio
+
+  delay: f32[BS]
+  for i in 0..BS:
+    halfLength = 170.0 / freq / (pitch[i] * (1.0 + vg * vibrato[i] * envelope[i]))
+    delay[i] = 0.0014705883 * SR * max(1020.0 / SR, halfLength - loopDelay)
+
+  frame = 0 {BS, wrap}
+  sample:
+    # bell: the wave leaving the bore comes back through the smoother
+    cursor += 1
+    toMouth.write(cursor, bell.tick(bellOut, pb))
+    tap = DelayTap()
+    tap.prepare(delay[frame])
+    fromBell = toMouth.read(tap, cursor - 1)
+    # blower: pressure + vibrato + breath noise
+    seed = 12345 + 1103515245 * seed
+    n = 0.0000000004656613 * f32(seed)
+    t = n - (gk * s1 + s2)
+    v1 = s1 + c1 * t
+    lp = s2 + g * v1
+    s1 += 2.0 * c1 * t
+    s2 += 2.0 * g * v1
+    e = envelope[frame]
+    blow = e + vg * vibrato[frame] + 0.05 * e * lp
+    # mouthpiece: reed table on the pressure difference
+    p = blow + boreIn
+    toBell.write(cursor, blow - mouth * clamp(0.7 - slope * mouth, -1.0, 1.0))
+    mouth = p
+    boreIn = fromBell
+    # bell side: the toBell output reaches the bell one sample after it is read
+    bellOut = bellIn
+    bellIn = toBell.read(tap, cursor - 1)
+    out = outGain * bellOut
+    out1 = out
+    out2 = out
+    frame += 1
